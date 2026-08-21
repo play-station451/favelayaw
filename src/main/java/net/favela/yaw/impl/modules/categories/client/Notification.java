@@ -39,7 +39,7 @@ public class Notification extends Module {
         MutableComponent msg = Component.empty()
                 .append(Component.literal("[")
                         .withStyle(bracketStyle))
-                .append(Component.literal("favelayaw")
+                .append(Component.literal("R3tard.dev")
                         .withStyle(Style.EMPTY.withColor(rgb)))
                 .append(Component.literal("] ")
                         .withStyle(bracketStyle))
