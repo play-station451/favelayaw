@@ -1,0 +1,17 @@
+version: v1.0
+name: Build Java
+agent:
+  machine:
+    type: e1-standard-2
+    os_image: ubuntu2204
+blocks:
+  - name: Build and Test
+    tasks:
+      - jobs:
+          - name: Gradle Build
+            commands:
+              - checkout
+              - sem-version java 21
+              - java -version
+              - chmod +x ./gradlew
+              - ./gradlew build
