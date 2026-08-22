@@ -15,3 +15,4 @@ blocks:
             - java -version
             - chmod +x ./gradlew
             - ./gradlew build
+            - artifact push workflow build/libs
