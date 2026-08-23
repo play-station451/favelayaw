@@ -13,7 +13,10 @@ public abstract class GameRendererMixin {
 
     @Inject(method = "nightVisionScale", at = @At("HEAD"), cancellable = true)
     private static void yaw$onNightVisionScale(LivingEntity entity, float partialTick, CallbackInfoReturnable<Float> cir) {
-        if (FullBright.INSTANCE != null && FullBright.INSTANCE.isPotionsMode()) {
+        boolean active = FullBright.INSTANCE != null && FullBright.INSTANCE.isPotionsMode();
+        System.out.println("[yaw] nightVisionScale hit, potionsMode=" + active);
+
+        if (active) {
             cir.setReturnValue(1.0F);
         }
     }
