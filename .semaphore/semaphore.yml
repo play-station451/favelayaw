@@ -16,8 +16,10 @@ blocks:
             - chmod +x ./gradlew
             - ./gradlew build || true
             - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
-            - echo "Minecraft jar found at $MC_JAR"
-            - unzip -l "$MC_JAR" | grep -i "renderer/Light" || true
-            - unzip -l "$MC_JAR" | grep -i "NightVision" || true
-            - unzip -l "$MC_JAR" | grep -i "lighting/" || true
+            - unzip -p "$MC_JAR" net/minecraft/client/renderer/Lightmap.class > /tmp/Lightmap.class
+            - unzip -p "$MC_JAR" net/minecraft/client/renderer/LightmapRenderStateExtractor.class > /tmp/LRSE.class
+            - echo "=== Lightmap ==="
+            - javap -p /tmp/Lightmap.class
+            - echo "=== LightmapRenderStateExtractor ==="
+            - javap -p /tmp/LRSE.class
             - artifact push workflow build/libs
