@@ -16,10 +16,6 @@ blocks:
             - chmod +x ./gradlew
             - ./gradlew build || true
             - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
-            - unzip -p "$MC_JAR" net/minecraft/client/renderer/Lightmap.class > /tmp/Lightmap.class
-            - unzip -p "$MC_JAR" net/minecraft/client/renderer/LightmapRenderStateExtractor.class > /tmp/LRSE.class
-            - echo "=== Lightmap ==="
-            - javap -p /tmp/Lightmap.class
-            - echo "=== LightmapRenderStateExtractor ==="
-            - javap -p /tmp/LRSE.class
+            - unzip -p "$MC_JAR" net/minecraft/world/entity/LivingEntity.class > /tmp/LE.class
+            - javap -p /tmp/LE.class | grep -i "hasEffect\|NIGHT_VISION\|MobEffect"
             - artifact push workflow build/libs
