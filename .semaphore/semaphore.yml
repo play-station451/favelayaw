@@ -15,4 +15,7 @@ blocks:
             - java -version
             - chmod +x ./gradlew
             - ./gradlew build
+            - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
+            - echo "Minecraft jar found at $MC_JAR"
+            - unzip -l "$MC_JAR" | grep -i LightTexture
             - artifact push workflow build/libs

@@ -15,7 +15,8 @@
 		"MixinDeathScreen",
 		"MixinGameRenderer",
 		"MixinLevelRenderer",
-		"ClientboundSetEntityMotionPacketMixin"
+		"ClientboundSetEntityMotionPacketMixin",
+		"LightTextureMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
