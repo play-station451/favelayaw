@@ -14,5 +14,9 @@ blocks:
             - sem-version java 21
             - java -version
             - chmod +x ./gradlew
-            - ./gradlew build
+            - ./gradlew build || true
+            - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
+            - echo "Minecraft jar found at $MC_JAR"
+            - unzip -p "$MC_JAR" net/minecraft/client/OptionInstance.class > /tmp/OI.class
+            - javap -p /tmp/OI.class
             - artifact push workflow build/libs

@@ -15,11 +15,11 @@ import static net.favela.yaw.impl.util.wrapper.Wrapper.MC;
 public class KillAura extends Module {
 
     public enum Mode {
-        Normal, OneEight;
+        Normal, Spam;
 
         @Override
         public String toString() {
-            return this == OneEight ? "1.8" : "Normal";
+            return this == Spam ? "1.8" : "Normal";
         }
     }
 
@@ -48,7 +48,7 @@ public class KillAura extends Module {
 
         switch (mode.get()) {
             case Normal -> handleNormal(target);
-            case OneEight -> handleOneEight(target);
+            case Spam -> handleSpam(target);
         }
     }
 
@@ -57,7 +57,7 @@ public class KillAura extends Module {
         attack(target);
     }
 
-    private void handleOneEight(Entity target) {
+    private void handleSpam(Entity target) {
         int interval = Math.max(1, Math.round(20.0f / legacyCps.getFloat()));
         tickCounter++;
         if (tickCounter < interval) return;
