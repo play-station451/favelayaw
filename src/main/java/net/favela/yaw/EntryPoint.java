@@ -7,7 +7,7 @@ import net.favela.yaw.impl.management.Manager;
 
 public class EntryPoint implements ClientModInitializer {
 
-    public static final String MOD_ID = "R3tard.dev";
+    public static final String MOD_ID = "r3tard_dev";
 
     private static String name;
     private static String version;
