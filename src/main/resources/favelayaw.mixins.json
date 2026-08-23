@@ -14,7 +14,8 @@
 		"MixinStringDecomposer",
 		"MixinDeathScreen",
 		"MixinGameRenderer",
-		"MixinLevelRenderer"
+		"MixinLevelRenderer",
+		"ClientboundSetEntityMotionPacketMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
