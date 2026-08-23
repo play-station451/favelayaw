@@ -4,6 +4,7 @@ import com.google.auto.service.AutoService;
 import net.favela.yaw.impl.modules.Module;
 import net.favela.yaw.impl.setting.settings.EnumSetting;
 import net.favela.yaw.impl.setting.settings.NumberSetting;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
@@ -13,17 +14,23 @@ import static net.favela.yaw.impl.util.wrapper.Wrapper.MC;
 @AutoService(Module.class)
 public class KillAura extends Module {
 
-    public enum Mode { Normal, Legacy18 }
+    public enum Mode {
+        Normal, OneEight;
+
+        @Override
+        public String toString() {
+            return this == OneEight ? "1.8" : "Normal";
+        }
+    }
+
+    public enum PlayersOnly { True, False }
 
     public static KillAura INSTANCE;
 
     public final EnumSetting<Mode> mode = enm("Mode", Mode.Normal);
     public final NumberSetting range = num("Range", 1.0f, 6.0f, 4.0f);
-    public final NumberSetting cps = num("CPS", 1.0f, 20.0f, 15.0f);
-    public final NumberSetting legacyCps = num("LegacyCPS", 5.0f, 20.0f, 20.0f);
+    public final NumberSetting legacyCps = num("1.8CPS", 5.0f, 20.0f, 20.0f);
     public final EnumSetting<PlayersOnly> players = enm("PlayersOnly", PlayersOnly.False);
-
-    public enum PlayersOnly { True, False }
 
     private int tickCounter;
 
@@ -41,20 +48,16 @@ public class KillAura extends Module {
 
         switch (mode.get()) {
             case Normal -> handleNormal(target);
-            case Legacy18 -> handleLegacy(target);
+            case OneEight -> handleOneEight(target);
         }
     }
 
     private void handleNormal(Entity target) {
-        int interval = Math.max(1, Math.round(20.0f / cps.getFloat()));
-        tickCounter++;
-        if (tickCounter < interval) return;
-        tickCounter = 0;
-
+        if (MC.player.getAttackStrengthScale(1.0F) < 1.0F) return;
         attack(target);
     }
 
-    private void handleLegacy(Entity target) {
+    private void handleOneEight(Entity target) {
         int interval = Math.max(1, Math.round(20.0f / legacyCps.getFloat()));
         tickCounter++;
         if (tickCounter < interval) return;
@@ -65,7 +68,7 @@ public class KillAura extends Module {
 
     private void attack(Entity target) {
         MC.gameMode.attack(MC.player, target);
-        MC.player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+        MC.player.swing(InteractionHand.MAIN_HAND);
     }
 
     private Entity findTarget() {
