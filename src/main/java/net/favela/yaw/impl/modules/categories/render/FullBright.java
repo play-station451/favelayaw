@@ -2,7 +2,6 @@ package net.favela.yaw.impl.modules.categories.render;
 
 import com.google.auto.service.AutoService;
 import net.favela.yaw.impl.modules.Module;
-import net.favela.yaw.impl.setting.settings.EnumSetting;
 import net.minecraft.client.OptionInstance;
 
 import java.lang.reflect.Field;
@@ -12,11 +11,7 @@ import static net.favela.yaw.impl.util.wrapper.Wrapper.MC;
 @AutoService(Module.class)
 public class FullBright extends Module {
 
-    public enum Mode { Gamma, Potions }
-
     public static FullBright INSTANCE;
-
-    public final EnumSetting<Mode> mode = enm("Mode", Mode.Gamma);
 
     private static Field valueField;
 
@@ -27,16 +22,12 @@ public class FullBright extends Module {
 
     @Override
     public void onEnable() {
-        if (mode.get() == Mode.Gamma) {
-            forceGamma(1000000.0);
-        }
+        forceGamma(1000000.0);
     }
 
     @Override
     public void onDisable() {
-        if (mode.get() == Mode.Gamma) {
-            forceGamma(1.0);
-        }
+        forceGamma(1.0);
     }
 
     private void forceGamma(double value) {
@@ -50,9 +41,5 @@ public class FullBright extends Module {
         } catch (Exception e) {
             e.printStackTrace();
         }
-    }
-
-    public boolean isPotionsMode() {
-        return isEnabled() && mode.get() == Mode.Potions;
     }
 }
