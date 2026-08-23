@@ -1,4 +1,4 @@
-package net.favela.yaw.mixins;
+package net.favela.yaw.mixin;
 
 import net.favela.yaw.impl.modules.categories.movement.Velocity;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
