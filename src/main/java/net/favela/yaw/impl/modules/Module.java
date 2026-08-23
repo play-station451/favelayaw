@@ -309,7 +309,6 @@ public abstract class Module {
 
     @Getter
     public enum Category {
-        GHOST("Ghost"),
         COMBAT("Combat"),
         MISC("Misc"),
         RENDER("Render"),

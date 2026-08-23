@@ -29,7 +29,7 @@ public class ConfigManager {
     private String currentConfig = DEFAULT_CONFIG;
 
     public ConfigManager() {
-        Path base = Minecraft.getInstance().gameDirectory.toPath().resolve("favelayaw");
+        Path base = Minecraft.getInstance().gameDirectory.toPath().resolve("R3tard");
         Path dir = base.resolve("configs");
         try {
             Files.createDirectories(dir);

@@ -15,9 +15,6 @@ public class FullBright extends Module {
 
     public final EnumSetting<Mode> mode = enm("Mode", Mode.Gamma);
 
-    private double prevGamma;
-    private boolean hasPrevGamma;
-
     public FullBright() {
         super("FullBright", "Brightens the world", Category.RENDER);
         INSTANCE = this;
@@ -26,37 +23,15 @@ public class FullBright extends Module {
     @Override
     public void onEnable() {
         if (mode.get() == Mode.Gamma) {
-            applyGamma();
-        }
-    }
-
-    @Override
-    public void onTick() {
-        if (mode.get() == Mode.Gamma) {
-            applyGamma();
-        } else if (hasPrevGamma) {
-            restoreGamma();
+            MC.options.gamma().set(1000000.0);
         }
     }
 
     @Override
     public void onDisable() {
-        restoreGamma();
-    }
-
-    private void applyGamma() {
-        if (MC.options == null) return;
-        if (!hasPrevGamma) {
-            prevGamma = MC.options.gamma().get();
-            hasPrevGamma = true;
+        if (mode.get() == Mode.Gamma) {
+            MC.options.gamma().set(1.0);
         }
-        MC.options.gamma().set(1000.0D);
-    }
-
-    private void restoreGamma() {
-        if (MC.options == null || !hasPrevGamma) return;
-        MC.options.gamma().set(prevGamma);
-        hasPrevGamma = false;
     }
 
     public boolean isPotionsMode() {

@@ -16,7 +16,7 @@
 		"MixinGameRenderer",
 		"MixinLevelRenderer",
 		"ClientboundSetEntityMotionPacketMixin",
-		"LivingEntityMixin"
+		"GameRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
