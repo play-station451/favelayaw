@@ -21,18 +21,17 @@ public abstract class ClientboundSetEntityMotionPacketMixin {
         ClientboundSetEntityMotionPacket packet = (ClientboundSetEntityMotionPacket) (Object) this;
 
         if (MC.player == null || MC.level == null) return;
-        if (packet.getId() != MC.player.getId()) return;
+        if (packet.id() != MC.player.getId()) return;
         if (Velocity.INSTANCE == null || !Velocity.INSTANCE.isEnabled()) return;
 
         ClientLevel level = MC.level;
-        Entity entity = level.getEntity(packet.getId());
+        Entity entity = level.getEntity(packet.id());
         if (entity == null) return;
 
-        Vec3 movement = packet.getMovement();
+        Vec3 movement = packet.movement();
         double[] modified = Velocity.INSTANCE.modify(movement.x, movement.y, movement.z);
 
         entity.setDeltaMovement(modified[0], modified[1], modified[2]);
-        entity.hasImpulse = true;
 
         ci.cancel();
     }

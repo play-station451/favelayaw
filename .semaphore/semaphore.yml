@@ -14,10 +14,5 @@ blocks:
             - sem-version java 21
             - java -version
             - chmod +x ./gradlew
-            - ./gradlew build || true
-            - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
-            - echo "Minecraft jar found at $MC_JAR"
-            - unzip -l "$MC_JAR" | grep -i SetEntityMotion
-            - unzip -p "$MC_JAR" net/minecraft/network/protocol/game/ClientboundSetEntityMotionPacket.class > /tmp/CSEMP.class
-            - javap -p /tmp/CSEMP.class
+            - ./gradlew build
             - artifact push workflow build/libs
