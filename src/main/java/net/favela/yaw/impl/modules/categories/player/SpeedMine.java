@@ -49,6 +49,7 @@ public class SpeedMine extends Module {
 
     private final List<Target> active = new ArrayList<>();
     private boolean wasAttackDown;
+    private int originalSlot = -1;
 
     public SpeedMine() {
         super("SpeedMine", "Breaks multiple adjacent blocks at once", Category.PLAYER);
@@ -62,6 +63,7 @@ public class SpeedMine extends Module {
         }
         active.clear();
         wasAttackDown = false;
+        endPickaxeHold();
     }
 
     @Override
@@ -91,21 +93,32 @@ public class SpeedMine extends Module {
                 case Quadruple -> 4;
             };
 
-            for (BlockPos p : buildPattern(primary, face, wanted)) {
-                BlockState state = MC.level.getBlockState(p);
-                if (state.isAir()) continue;
+            List<BlockPos> pattern = buildPattern(primary, face, wanted);
+            boolean any = false;
+            for (BlockPos p : pattern) {
+                if (!MC.level.getBlockState(p).isAir()) {
+                    any = true;
+                    break;
+                }
+            }
 
-                Target t = new Target();
-                t.pos = p.immutable();
-                t.face = face;
-                t.startMs = System.currentTimeMillis();
-                t.requiredMs = breakTimeMs(state, t.pos);
-                active.add(t);
+            if (any) {
+                beginPickaxeHold();
 
-                withPickaxe(() -> {
+                for (BlockPos p : pattern) {
+                    BlockState state = MC.level.getBlockState(p);
+                    if (state.isAir()) continue;
+
+                    Target t = new Target();
+                    t.pos = p.immutable();
+                    t.face = face;
+                    t.startMs = System.currentTimeMillis();
+                    t.requiredMs = breakTimeMs(state, t.pos);
+                    active.add(t);
+
                     send(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, t.pos, t.face);
                     swing();
-                });
+                }
             }
         }
 
@@ -130,10 +143,8 @@ public class SpeedMine extends Module {
 
             if (System.currentTimeMillis() - t.startMs < t.requiredMs) continue;
 
-            withPickaxe(() -> {
-                send(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, t.pos, t.face);
-                swing();
-            });
+            send(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, t.pos, t.face);
+            swing();
 
             if (instantRebreak.get()) {
                 active.remove(i);
@@ -141,6 +152,10 @@ public class SpeedMine extends Module {
                 t.cooldown = 2;
                 t.startMs = System.currentTimeMillis() + 100000L;
             }
+        }
+
+        if (active.isEmpty()) {
+            endPickaxeHold();
         }
     }
 
@@ -180,23 +195,27 @@ public class SpeedMine extends Module {
         }
     }
 
-    private void withPickaxe(Runnable action) {
-        if (!autoSwitch.get()) {
-            action.run();
-            return;
-        }
+    /**
+     * Switches to the best pickaxe ONCE at the start of a mine and keeps it selected
+     * for the whole duration — the server tracks your held item continuously while
+     * digging, so swapping back mid-mine makes it think you never had a tool equipped.
+     */
+    private void beginPickaxeHold() {
+        if (!autoSwitch.get() || originalSlot != -1) return;
 
-        int original = MC.player.getInventory().getSelectedSlot();
+        int current = MC.player.getInventory().getSelectedSlot();
         int pickaxeSlot = findBestPickaxe();
 
-        if (pickaxeSlot < 0 || pickaxeSlot == original) {
-            action.run();
-            return;
-        }
+        if (pickaxeSlot < 0 || pickaxeSlot == current) return;
 
+        originalSlot = current;
         MC.player.connection.send(new ServerboundSetCarriedItemPacket(pickaxeSlot));
-        action.run();
-        MC.player.connection.send(new ServerboundSetCarriedItemPacket(original));
+    }
+
+    private void endPickaxeHold() {
+        if (originalSlot == -1) return;
+        MC.player.connection.send(new ServerboundSetCarriedItemPacket(originalSlot));
+        originalSlot = -1;
     }
 
     private int findBestPickaxe() {
