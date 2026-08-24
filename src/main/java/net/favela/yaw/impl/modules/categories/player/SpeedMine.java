@@ -43,10 +43,12 @@ public class SpeedMine extends Module {
         BlockPos pos;
         Direction face;
         long startMs;
+        long requiredMs;
         int cooldown;
     }
 
     private final List<Target> active = new ArrayList<>();
+    private boolean wasAttackDown;
 
     public SpeedMine() {
         super("SpeedMine", "Breaks multiple adjacent blocks at once", Category.PLAYER);
@@ -59,6 +61,7 @@ public class SpeedMine extends Module {
             send(ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK, t.pos, t.face);
         }
         active.clear();
+        wasAttackDown = false;
     }
 
     @Override
@@ -69,53 +72,51 @@ public class SpeedMine extends Module {
             if (t.cooldown > 0) t.cooldown--;
         }
 
-        boolean holding = MC.options.keyAttack.isDown();
-        BlockHitResult blockHit = (holding && MC.hitResult instanceof BlockHitResult bh
-                && bh.getType() == HitResult.Type.BLOCK) ? bh : null;
+        // edge-triggered: only START a new set of targets the instant the button goes down,
+        // never require it to stay held for mining to continue
+        boolean attackDown = MC.options.keyAttack.isDown();
+        boolean justClicked = attackDown && !wasAttackDown;
+        wasAttackDown = attackDown;
 
-        if (blockHit == null) {
-            for (Target t : active) {
-                send(ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK, t.pos, t.face);
+        if (justClicked && active.isEmpty()
+                && MC.hitResult instanceof BlockHitResult blockHit
+                && blockHit.getType() == HitResult.Type.BLOCK) {
+
+            BlockPos primary = blockHit.getBlockPos();
+            Direction face = blockHit.getDirection();
+
+            int wanted = switch (mode.get()) {
+                case Single -> 1;
+                case Double -> 2;
+                case Quadruple -> 4;
+            };
+
+            for (BlockPos p : buildPattern(primary, face, wanted)) {
+                BlockState state = MC.level.getBlockState(p);
+                if (state.isAir()) continue;
+
+                Target t = new Target();
+                t.pos = p.immutable();
+                t.face = face;
+                t.startMs = System.currentTimeMillis();
+                t.requiredMs = breakTimeMs(state, t.pos);
+                active.add(t);
+
+                withPickaxe(() -> {
+                    send(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, t.pos, t.face);
+                    swing();
+                });
             }
-            active.clear();
-            return;
         }
 
-        BlockPos primary = blockHit.getBlockPos();
-        Direction face = blockHit.getDirection();
-
-        int wanted = switch (mode.get()) {
-            case Single -> 1;
-            case Double -> 2;
-            case Quadruple -> 4;
-        };
-
-        List<BlockPos> desired = buildPattern(primary, face, wanted);
-
+        // out-of-range safety: abort anything the player has moved too far from
         active.removeIf(t -> {
-            if (desired.contains(t.pos)) return false;
+            double dist = MC.player.position().distanceTo(
+                    net.minecraft.world.phys.Vec3.atCenterOf(t.pos));
+            if (dist <= 6.0) return false;
             send(ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK, t.pos, t.face);
             return true;
         });
-
-        for (BlockPos p : desired) {
-            if (containsPos(p)) continue;
-            if (active.size() >= wanted) break;
-
-            BlockState state = MC.level.getBlockState(p);
-            if (state.isAir()) continue;
-
-            Target t = new Target();
-            t.pos = p.immutable();
-            t.face = face;
-            t.startMs = System.currentTimeMillis();
-            active.add(t);
-
-            withPickaxe(() -> {
-                send(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, t.pos, t.face);
-                swing();
-            });
-        }
 
         for (int i = active.size() - 1; i >= 0; i--) {
             Target t = active.get(i);
@@ -127,14 +128,7 @@ public class SpeedMine extends Module {
                 continue;
             }
 
-            float hardness = state.getDestroySpeed(MC.level, t.pos);
-            if (hardness < 0) {
-                active.remove(i);
-                continue;
-            }
-
-            long requiredMs = Math.max(50L, (long) (hardness * 1000.0));
-            if (System.currentTimeMillis() - t.startMs < requiredMs) continue;
+            if (System.currentTimeMillis() - t.startMs < t.requiredMs) continue;
 
             withPickaxe(() -> {
                 send(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, t.pos, t.face);
@@ -148,6 +142,30 @@ public class SpeedMine extends Module {
                 t.startMs = System.currentTimeMillis() + 100000L;
             }
         }
+    }
+
+    /**
+     * Approximates vanilla's real break-time formula: hardness * 30 ticks / tool speed,
+     * assuming the correct tool (we auto-switch to the best pickaxe) and standing on ground.
+     * This is what makes the timing fast AND accurate enough for the server to accept the break.
+     */
+    private long breakTimeMs(BlockState state, BlockPos pos) {
+        float hardness = state.getDestroySpeed(MC.level, pos);
+        if (hardness < 0) return Long.MAX_VALUE;
+        if (hardness == 0) return 50L;
+
+        float toolSpeed = 1.0f;
+        if (autoSwitch.get()) {
+            int slot = findBestPickaxe();
+            if (slot >= 0) {
+                ItemStack stack = MC.player.getInventory().getItem(slot);
+                toolSpeed = stack.getDestroySpeed(state);
+                if (toolSpeed <= 0) toolSpeed = 1.0f;
+            }
+        }
+
+        int ticks = Math.max(1, (int) Math.ceil((hardness * 30f) / toolSpeed));
+        return Math.max(50L, ticks * 50L);
     }
 
     @Override
@@ -194,13 +212,6 @@ public class SpeedMine extends Module {
             }
         }
         return best;
-    }
-
-    private boolean containsPos(BlockPos pos) {
-        for (Target t : active) {
-            if (t.pos.equals(pos)) return true;
-        }
-        return false;
     }
 
     private List<BlockPos> buildPattern(BlockPos primary, Direction face, int count) {
