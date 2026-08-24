@@ -17,6 +17,6 @@ blocks:
             - ./gradlew build || true
             - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
             - echo "Minecraft jar found at $MC_JAR"
-            - unzip -p "$MC_JAR" net/minecraft/client/OptionInstance.class > /tmp/OI.class
-            - javap -p /tmp/OI.class
+            - unzip -p "$MC_JAR" net/minecraft/world/level/block/state/BlockBehaviour\$BlockStateBase.class > /tmp/BSB.class
+            - javap -p /tmp/BSB.class | grep -i destroy
             - artifact push workflow build/libs
