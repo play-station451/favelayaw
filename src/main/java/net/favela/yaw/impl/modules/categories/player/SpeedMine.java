@@ -12,9 +12,9 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.PickaxeItem;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -186,7 +186,7 @@ public class SpeedMine extends Module {
         float bestSpeed = -1.0f;
         for (int i = 0; i < 9; i++) {
             ItemStack stack = MC.player.getInventory().getItem(i);
-            if (!(stack.getItem() instanceof PickaxeItem)) continue;
+            if (!stack.is(ItemTags.PICKAXES)) continue;
             float speed = stack.getDestroySpeed(Blocks.STONE.defaultBlockState());
             if (speed > bestSpeed) {
                 bestSpeed = speed;
