@@ -26,11 +26,18 @@ public class FullBright extends Module {
     }
 
     @Override
+    public void onTick() {
+        forceGamma(1000000.0);
+    }
+
+    @Override
     public void onDisable() {
         forceGamma(1.0);
     }
 
     private void forceGamma(double value) {
+        if (MC.options == null) return;
+
         try {
             OptionInstance<Double> gamma = MC.options.gamma();
             if (valueField == null) {
