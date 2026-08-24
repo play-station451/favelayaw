@@ -6,6 +6,7 @@ import net.favela.yaw.impl.modules.Module;
 import net.favela.yaw.impl.setting.settings.BooleanSetting;
 import net.favela.yaw.impl.setting.settings.ColorSetting;
 import net.favela.yaw.impl.setting.settings.EnumSetting;
+import net.favela.yaw.impl.setting.settings.NumberSetting;
 import net.favela.yaw.impl.util.render.RenderUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -20,9 +21,12 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.awt.Color;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 
 import static net.favela.yaw.impl.util.wrapper.Wrapper.MC;
@@ -35,34 +39,37 @@ public class SpeedMine extends Module {
     public static SpeedMine INSTANCE;
 
     public final EnumSetting<Mode> mode = enm("Mode", Mode.Double);
-    public final BooleanSetting instantRebreak = register(new BooleanSetting("InstantRebreak", "Immediately starts the next block with no delay", true));
+    public final BooleanSetting instantRebreak = register(new BooleanSetting("InstantRebreak", "Keeps mining new blocks automatically while held, with no delay between them", true));
     public final BooleanSetting autoSwitch = register(new BooleanSetting("AutoSwitch", "Silently switches to the best pickaxe while mining", true));
-    public final ColorSetting boxColor = color("Color", new Color(167, 123, 234, 120), true);
+    public final NumberSetting threshold = num("Threshold", 0.5f, 1.0f, 0.7f);
+    public final ColorSetting boxColor = color("Color", new Color(167, 123, 234, 200), true);
 
     private static class Target {
         BlockPos pos;
         Direction face;
         long startMs;
         long requiredMs;
-        int cooldown;
     }
 
-    private final List<Target> active = new ArrayList<>();
-    private boolean wasAttackDown;
+    private Target current;
+    private final Deque<BlockPos> queue = new ArrayDeque<>();
+    private final List<BlockPos> queuedOutline = new ArrayList<>();
+
     private int originalSlot = -1;
 
     public SpeedMine() {
-        super("SpeedMine", "Breaks multiple adjacent blocks at once", Category.PLAYER);
+        super("SpeedMine", "Breaks multiple adjacent blocks in quick succession", Category.PLAYER);
         INSTANCE = this;
     }
 
     @Override
     public void onDisable() {
-        for (Target t : active) {
-            send(ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK, t.pos, t.face);
+        if (current != null) {
+            send(ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK, current.pos, current.face);
         }
-        active.clear();
-        wasAttackDown = false;
+        current = null;
+        queue.clear();
+        queuedOutline.clear();
         endPickaxeHold();
     }
 
@@ -70,17 +77,11 @@ public class SpeedMine extends Module {
     public void onTick() {
         if (MC.player == null || MC.level == null) return;
 
-        for (Target t : active) {
-            if (t.cooldown > 0) t.cooldown--;
-        }
-
-        // edge-triggered: only START a new set of targets the instant the button goes down,
-        // never require it to stay held for mining to continue
         boolean attackDown = MC.options.keyAttack.isDown();
-        boolean justClicked = attackDown && !wasAttackDown;
-        wasAttackDown = attackDown;
 
-        if (justClicked && active.isEmpty()
+        // start a fresh batch when idle: either you just clicked, or (with InstantRebreak)
+        // you're still holding the button and nothing is queued/mining right now
+        if (current == null && queue.isEmpty() && attackDown
                 && MC.hitResult instanceof BlockHitResult blockHit
                 && blockHit.getType() == HitResult.Type.BLOCK) {
 
@@ -94,75 +95,77 @@ public class SpeedMine extends Module {
             };
 
             List<BlockPos> pattern = buildPattern(primary, face, wanted);
-            boolean any = false;
             for (BlockPos p : pattern) {
                 if (!MC.level.getBlockState(p).isAir()) {
-                    any = true;
-                    break;
+                    queue.add(p);
                 }
             }
 
-            if (any) {
+            if (!queue.isEmpty()) {
                 beginPickaxeHold();
+                startNext(face);
+            }
+        }
 
-                for (BlockPos p : pattern) {
-                    BlockState state = MC.level.getBlockState(p);
-                    if (state.isAir()) continue;
+        if (current != null) {
+            BlockState state = MC.level.getBlockState(current.pos);
 
-                    Target t = new Target();
-                    t.pos = p.immutable();
-                    t.face = face;
-                    t.startMs = System.currentTimeMillis();
-                    t.requiredMs = breakTimeMs(state, t.pos);
-                    active.add(t);
-
-                    send(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, t.pos, t.face);
+            if (state.isAir()
+                    || MC.player.position().distanceTo(Vec3.atCenterOf(current.pos)) > 6.0) {
+                current = null;
+            } else {
+                long elapsed = System.currentTimeMillis() - current.startMs;
+                if (elapsed >= current.requiredMs) {
+                    send(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, current.pos, current.face);
                     swing();
+                    Direction lastFace = current.face;
+                    current = null;
+
+                    if (!queue.isEmpty()) {
+                        startNext(lastFace);
+                    }
                 }
             }
         }
 
-        // out-of-range safety: abort anything the player has moved too far from
-        active.removeIf(t -> {
-            double dist = MC.player.position().distanceTo(
-                    net.minecraft.world.phys.Vec3.atCenterOf(t.pos));
-            if (dist <= 6.0) return false;
-            send(ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK, t.pos, t.face);
-            return true;
-        });
-
-        for (int i = active.size() - 1; i >= 0; i--) {
-            Target t = active.get(i);
-            if (t.cooldown > 0) continue;
-
-            BlockState state = MC.level.getBlockState(t.pos);
-            if (state.isAir()) {
-                active.remove(i);
-                continue;
-            }
-
-            if (System.currentTimeMillis() - t.startMs < t.requiredMs) continue;
-
-            send(ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, t.pos, t.face);
-            swing();
-
-            if (instantRebreak.get()) {
-                active.remove(i);
-            } else {
-                t.cooldown = 2;
-                t.startMs = System.currentTimeMillis() + 100000L;
+        // once fully idle: only keep chaining automatically if InstantRebreak is on
+        // and the button is still held, otherwise release the pickaxe hold
+        if (current == null && queue.isEmpty()) {
+            if (!(instantRebreak.get() && attackDown)) {
+                endPickaxeHold();
             }
         }
 
-        if (active.isEmpty()) {
-            endPickaxeHold();
+        queuedOutline.clear();
+        queuedOutline.addAll(queue);
+    }
+
+    private void startNext(Direction face) {
+        BlockPos pos = queue.poll();
+        if (pos == null) return;
+
+        BlockState state = MC.level.getBlockState(pos);
+        if (state.isAir()) {
+            if (!queue.isEmpty()) startNext(face);
+            return;
         }
+
+        Target t = new Target();
+        t.pos = pos;
+        t.face = face;
+        t.startMs = System.currentTimeMillis();
+        t.requiredMs = breakTimeMs(state, pos);
+        current = t;
+
+        send(ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, t.pos, t.face);
+        swing();
     }
 
     /**
-     * Approximates vanilla's real break-time formula: hardness * 30 ticks / tool speed,
-     * assuming the correct tool (we auto-switch to the best pickaxe) and standing on ground.
-     * This is what makes the timing fast AND accurate enough for the server to accept the break.
+     * Real vanilla break time (hardness * 30 ticks / tool speed, correct-tool assumed),
+     * scaled down by Threshold — the server's own completion check only requires
+     * elapsed-time-based progress to reach roughly that fraction, not a full 100%,
+     * so stopping early still gets accepted as a completed break.
      */
     private long breakTimeMs(BlockState state, BlockPos pos) {
         float hardness = state.getDestroySpeed(MC.level, pos);
@@ -179,36 +182,48 @@ public class SpeedMine extends Module {
             }
         }
 
-        int ticks = Math.max(1, (int) Math.ceil((hardness * 30f) / toolSpeed));
+        float fraction = threshold.getFloat();
+        int ticks = Math.max(1, (int) Math.ceil((hardness * 30f * fraction) / toolSpeed));
         return Math.max(50L, ticks * 50L);
     }
 
     @Override
     public void onRender3D(Render3DEvent event) {
-        if (MC.level == null || active.isEmpty()) return;
+        if (MC.level == null) return;
 
         Color base = boxColor.get();
-        for (Target t : active) {
-            AABB box = new AABB(t.pos);
-            RenderUtil.drawBoxFilled(event.getMatrix(), box, base);
+
+        for (BlockPos pos : queuedOutline) {
+            AABB box = new AABB(pos);
             RenderUtil.drawBoxOutline(event.getMatrix(), box, base, 1.0f);
+        }
+
+        if (current != null) {
+            AABB fullBox = new AABB(current.pos);
+            RenderUtil.drawBoxOutline(event.getMatrix(), fullBox, base, 1.5f);
+
+            long elapsed = System.currentTimeMillis() - current.startMs;
+            float progress = Math.max(0f, Math.min(1f, (float) elapsed / current.requiredMs));
+
+            double cx = current.pos.getX() + 0.5;
+            double cy = current.pos.getY() + 0.5;
+            double cz = current.pos.getZ() + 0.5;
+            double half = 0.5 * progress;
+            AABB growingBox = new AABB(cx - half, cy - half, cz - half, cx + half, cy + half, cz + half);
+
+            RenderUtil.drawBoxFilled(event.getMatrix(), growingBox, base);
         }
     }
 
-    /**
-     * Switches to the best pickaxe ONCE at the start of a mine and keeps it selected
-     * for the whole duration — the server tracks your held item continuously while
-     * digging, so swapping back mid-mine makes it think you never had a tool equipped.
-     */
     private void beginPickaxeHold() {
         if (!autoSwitch.get() || originalSlot != -1) return;
 
-        int current = MC.player.getInventory().getSelectedSlot();
+        int currentSlot = MC.player.getInventory().getSelectedSlot();
         int pickaxeSlot = findBestPickaxe();
 
-        if (pickaxeSlot < 0 || pickaxeSlot == current) return;
+        if (pickaxeSlot < 0 || pickaxeSlot == currentSlot) return;
 
-        originalSlot = current;
+        originalSlot = currentSlot;
         MC.player.connection.send(new ServerboundSetCarriedItemPacket(pickaxeSlot));
     }
 
