@@ -12,6 +12,7 @@ import net.favela.yaw.impl.setting.settings.EnumSetting;
 import net.favela.yaw.impl.setting.settings.NumberSetting;
 import net.favela.yaw.impl.util.render.RenderUtil;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.Direction;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
@@ -53,7 +54,7 @@ public class SpeedMine extends Module {
     public final BooleanSetting grim = bool("Grim", "Use the extra start/stop sequence", false);
     public final BooleanSetting doubleMine = bool("DoubleMine", "Keep the previous block mining in the background", false);
     public final BooleanSetting instant = bool("Instant", "Remine blocks as soon as the server confirms the break", true);
-    public final NumberSetting instantDelay = num("InstantDelay", "Delay between instant remine packets", () -> instant.get(), 0, 1000, 0, 1);
+    public final NumberSetting instantDelay = register(new NumberSetting("InstantDelay", "Delay between instant remine packets", () -> instant.get(), 0, 1000, 0, 1));
     public final BooleanSetting simulate = bool("Simulate", "Update the local world immediately after finishing", true);
     public final BooleanSetting swing = bool("Swing", "Swing while mining", true);
     public final BooleanSetting multitask = bool("Multitask", "Allow mining while using an item", false);
@@ -434,7 +435,7 @@ public class SpeedMine extends Module {
 
     private int getEfficiency(ItemStack stack) {
         try {
-            return stack.getEnchantments().getLevel(Enchantments.EFFICIENCY);
+            return stack.getEnchantments().getLevel(BuiltInRegistries.ENCHANTMENT.getHolderOrThrow(Enchantments.EFFICIENCY));
         } catch (Throwable ignored) {
             return 0;
         }
@@ -442,7 +443,7 @@ public class SpeedMine extends Module {
 
     private boolean hasAquaAffinity(ItemStack stack) {
         try {
-            return stack.getEnchantments().getLevel(Enchantments.AQUA_AFFINITY) > 0;
+            return stack.getEnchantments().getLevel(BuiltInRegistries.ENCHANTMENT.getHolderOrThrow(Enchantments.AQUA_AFFINITY)) > 0;
         } catch (Throwable ignored) {
             return false;
         }
