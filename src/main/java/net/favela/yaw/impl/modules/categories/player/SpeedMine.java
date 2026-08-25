@@ -1106,7 +1106,7 @@ public class SpeedMine extends Module {
             BlockState state,
             BlockBreakingTask task
     ) {
-        if (state.getBlock() == Blocks.OBSIDIAN && isActive()) {
+        if (state.getBlock() == Blocks.OBSIDIAN && isEnabled()) {
             return true;
         }
 
@@ -1129,7 +1129,7 @@ public class SpeedMine extends Module {
             BlockState state,
             BlockBreakingTask task
     ) {
-        if (state.getBlock() == Blocks.OBSIDIAN && isActive()) {
+        if (state.getBlock() == Blocks.OBSIDIAN && isEnabled()) {
             return 1000.0f;
         }
 
