@@ -20,29 +20,7 @@ blocks:
 
             - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
             - echo "Minecraft jar found at $MC_JAR"
-
-            - echo "=== ClientLevel methods ==="
-            - 'javap -classpath "$MC_JAR" net.minecraft.client.multiplayer.ClientLevel 2>&1 | grep -Ei "predict|sequence|pending|update" | head -n 100'
-
-            - echo "=== MultiPlayerGameMode methods ==="
-            - 'javap -classpath "$MC_JAR" net.minecraft.client.multiplayer.MultiPlayerGameMode 2>&1 | grep -Ei "predict|sequence|destroy|start|stop|block" | head -n 150'
-
-            - echo "=== Prediction package ==="
-            - 'jar tf "$MC_JAR" 2>/dev/null | grep "net/minecraft/client/multiplayer/prediction/" | head -n 100'
-
-            - echo "=== BlockStatePredictionHandler ==="
-            - 'javap -classpath "$MC_JAR" net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler 2>&1 | head -n 150'
-
-            - echo "=== PredictiveAction ==="
-            - 'javap -classpath "$MC_JAR" net.minecraft.client.multiplayer.prediction.PredictiveAction 2>&1 | head -n 150'
-
-            - echo "=== ClientPacketListener methods ==="
-            - 'javap -classpath "$MC_JAR" net.minecraft.client.multiplayer.ClientPacketListener 2>&1 | grep -Ei "sequence|predict|send|packet" | head -n 150'
-
-            - echo "=== PlayerActionPacket ==="
-            - 'javap -classpath "$MC_JAR" net.minecraft.network.protocol.game.ServerboundPlayerActionPacket 2>&1 | head -n 120'
-
-            - echo "=== Client jar prediction classes ==="
-            - 'find ~/.gradle/caches/fabric-loom/26.2 -type f -name "*.jar" -print'
+            - echo "=== MultiPlayerGameMode ==="
+            - 'javap -classpath "$MC_JAR" -p net.minecraft.client.multiplayer.MultiPlayerGameMode 2>&1 | grep -A 3 -B 3 "startPrediction"'
 
             - 'artifact push workflow build/libs'
