@@ -15,7 +15,8 @@
 		"MixinDeathScreen",
 		"MixinGameRenderer",
 		"MixinLevelRenderer",
-		"ClientboundSetEntityMotionPacketMixin"
+		"ClientboundSetEntityMotionPacketMixin",
+		"MixinMultiPlayerGameMode"
 	],
 	"injectors": {
 		"defaultRequire": 1
