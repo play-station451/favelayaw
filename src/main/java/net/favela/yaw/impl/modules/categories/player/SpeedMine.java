@@ -225,6 +225,11 @@ public class SpeedMine extends Module {
         return MC.player.getEyePosition().distanceTo(Vec3.atCenterOf(pos)) <= range.getFloat();
     }
 
+    /**
+     * Accurate vanilla per-tick dig progress: tool speed (including efficiency, haste,
+     * mining fatigue, being underwater without Aqua Affinity, and not being on ground)
+     * divided by block hardness, divided by 30 with the correct tool or 100 without.
+     */
     private float damagePerTick(BlockState state, BlockPos pos) {
         float hardness = state.getDestroySpeed(MC.level, pos);
         if (hardness < 0) return 0f;
@@ -251,9 +256,7 @@ public class SpeedMine extends Module {
             toolSpeed *= multiplier;
         }
 
-        if (MC.player.isEyeInFluid(net.minecraft.tags.FluidTags.WATER)
-                && !MC.player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.HEAD)
-                        .is(net.minecraft.world.item.enchantment.Enchantments.AQUA_AFFINITY.location())) {
+        if (MC.player.isEyeInFluid(net.minecraft.tags.FluidTags.WATER)) {
             toolSpeed /= 5.0f;
         }
 
