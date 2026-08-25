@@ -16,7 +16,8 @@
 		"MixinGameRenderer",
 		"MixinLevelRenderer",
 		"ClientboundSetEntityMotionPacketMixin",
-		"MixinMultiPlayerGameMode"
+		"MixinMultiPlayerGameMode",
+		"MultiPlayerGameModeAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1
