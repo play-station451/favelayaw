@@ -1,3 +1,4 @@
+```java
 package net.favela.yaw.impl.modules.categories.player;
 
 import com.google.auto.service.AutoService;
@@ -33,6 +34,8 @@ import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.awt.Color;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static net.favela.yaw.impl.util.wrapper.Wrapper.MC;
 
@@ -131,10 +134,14 @@ public class SpeedMine extends Module {
     private final Timer instantRemineTimer = new Timer();
     private final Timer instantRemineResetTimer = new Timer();
 
+    private final Map<BlockBreakingTask, Integer> silentOwners =
+            new LinkedHashMap<>();
+
     public BlockBreakingTask currentTask;
     public BlockBreakingTask doubleMineTask;
 
     private int silentPreviousSlot = -1;
+    private int silentServerSlot = -1;
     private int doubleMinePreviousSlot = -1;
 
     private Events.Handler<StartBreakingBlockEvent> startHandler;
@@ -167,7 +174,10 @@ public class SpeedMine extends Module {
 
         currentTask = null;
         doubleMineTask = null;
+
+        silentOwners.clear();
         silentPreviousSlot = -1;
+        silentServerSlot = -1;
         doubleMinePreviousSlot = -1;
     }
 
@@ -184,7 +194,7 @@ public class SpeedMine extends Module {
         currentTask = null;
         doubleMineTask = null;
 
-        restoreSilentSlot();
+        clearSilentSwaps();
         restoreDoubleMineSlot();
 
         if (startHandler != null) {
@@ -253,12 +263,14 @@ public class SpeedMine extends Module {
             return;
         }
 
-        if (currentTask != null && currentTask.getBlockPos().equals(pos)) {
+        if (currentTask != null
+                && currentTask.getBlockPos().equals(pos)) {
             event.cancel();
             return;
         }
 
-        if (doubleMineTask != null && doubleMineTask.getBlockPos().equals(pos)) {
+        if (doubleMineTask != null
+                && doubleMineTask.getBlockPos().equals(pos)) {
             event.cancel();
             return;
         }
@@ -321,7 +333,7 @@ public class SpeedMine extends Module {
         }
 
         if (swap.get() == Swap.SILENT && slot >= 0) {
-            switchToSilent(slot);
+            acquireSilentSwap(task, slot);
         }
 
         if (rotate.get() == Rotate.NORMAL) {
@@ -360,10 +372,12 @@ public class SpeedMine extends Module {
         }
 
         if (!task.isStarted()) {
+            releaseSilentSwap(task);
             return;
         }
 
         if (task.isCompleted()) {
+            releaseSilentSwap(task);
             return;
         }
 
@@ -381,6 +395,8 @@ public class SpeedMine extends Module {
         );
 
         task.setAborted(true);
+
+        releaseSilentSwap(task);
     }
 
     private void handleCurrentTask(BlockBreakingTask task) {
@@ -393,6 +409,7 @@ public class SpeedMine extends Module {
 
         if (eye.distanceTo(closestPoint(eye, box)) > range.getDouble()) {
             if (task == currentTask) {
+                releaseSilentSwap(task);
                 currentTask = null;
             }
 
@@ -504,17 +521,15 @@ public class SpeedMine extends Module {
         task.setToolSlot(slot);
 
         if (slot >= 0) {
-            if (doubleMinePreviousSlot == -1) {
-                doubleMinePreviousSlot =
-                        MC.player.getInventory().getSelectedSlot();
-            }
-
             if (swap.get() == Swap.NORMAL) {
+                if (doubleMinePreviousSlot == -1) {
+                    doubleMinePreviousSlot =
+                            MC.player.getInventory().getSelectedSlot();
+                }
+
                 MC.player.getInventory().setSelectedSlot(slot);
             } else if (swap.get() == Swap.SILENT) {
-                MC.player.connection.send(
-                        new ServerboundSetCarriedItemPacket(slot)
-                );
+                acquireSilentSwap(task, slot);
             }
         }
 
@@ -528,6 +543,7 @@ public class SpeedMine extends Module {
         );
 
         task.setSecondaryStarted(true);
+        task.markStarted();
     }
 
     private void finishDoubleMine(BlockBreakingTask task) {
@@ -545,19 +561,18 @@ public class SpeedMine extends Module {
         }
 
         int slot = getBestToolSlot(task.getStartState());
+        task.setToolSlot(slot);
 
         if (slot >= 0) {
-            if (doubleMinePreviousSlot == -1) {
-                doubleMinePreviousSlot =
-                        MC.player.getInventory().getSelectedSlot();
-            }
-
             if (swap.get() == Swap.NORMAL) {
+                if (doubleMinePreviousSlot == -1) {
+                    doubleMinePreviousSlot =
+                            MC.player.getInventory().getSelectedSlot();
+                }
+
                 MC.player.getInventory().setSelectedSlot(slot);
             } else if (swap.get() == Swap.SILENT) {
-                MC.player.connection.send(
-                        new ServerboundSetCarriedItemPacket(slot)
-                );
+                acquireSilentSwap(task, slot);
             }
         }
 
@@ -589,12 +604,17 @@ public class SpeedMine extends Module {
         task.markCompleted();
         task.markLastBroken();
 
+        releaseSilentSwap(task);
         restoreDoubleMineSlot();
 
         doubleMineTask = null;
     }
 
     private void cleanupDoubleMine() {
+        if (doubleMineTask != null) {
+            releaseSilentSwap(doubleMineTask);
+        }
+
         doubleMineTask = null;
         restoreDoubleMineSlot();
     }
@@ -629,18 +649,16 @@ public class SpeedMine extends Module {
                 int slot = getBestToolSlot(task.getStartState());
                 task.setToolSlot(slot);
 
-                if (swap.get() == Swap.NORMAL && slot >= 0) {
-                    MC.player.getInventory().setSelectedSlot(slot);
+                if (slot >= 0) {
+                    acquireSilentSwap(task, slot);
                 }
 
-                if (swap.get() == Swap.SILENT && slot >= 0) {
-                    switchToSilent(slot);
+                if (slot >= 0) {
+                    sendDestroyPacket(
+                            ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
+                            task
+                    );
                 }
-
-                sendDestroyPacket(
-                        ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
-                        task
-                );
 
                 task.setRemineStarted(true);
                 task.setCompleted(false);
@@ -673,12 +691,11 @@ public class SpeedMine extends Module {
 
             task.markCompleted();
             task.markLastBroken();
+
             instantRemineTimer.reset();
             instantRemineResetTimer.reset();
 
-            if (swap.get() == Swap.SILENT) {
-                restoreSilentSlot();
-            }
+            releaseSilentSwap(task);
 
             return;
         }
@@ -699,7 +716,7 @@ public class SpeedMine extends Module {
         }
 
         if (swap.get() == Swap.SILENT && slot >= 0) {
-            switchToSilent(slot);
+            acquireSilentSwap(task, slot);
         }
 
         if (grim.get()) {
@@ -725,9 +742,7 @@ public class SpeedMine extends Module {
             task.setClientSimulated(true);
         }
 
-        if (swap.get() == Swap.SILENT) {
-            restoreSilentSlot();
-        }
+        releaseSilentSwap(task);
     }
 
     private void onPacketReceive(PacketEvent.Receive event) {
@@ -826,39 +841,98 @@ public class SpeedMine extends Module {
         );
     }
 
-    private void switchToSilent(int slot) {
-        if (MC.player == null) {
-            return;
-        }
-
-        int current =
-                MC.player.getInventory().getSelectedSlot();
-
-        if (current == slot) {
+    private void acquireSilentSwap(
+            BlockBreakingTask task,
+            int slot
+    ) {
+        if (MC.player == null || slot < 0 || slot > 8) {
             return;
         }
 
         if (silentPreviousSlot == -1) {
-            silentPreviousSlot = current;
+            silentPreviousSlot =
+                    MC.player.getInventory().getSelectedSlot();
+
+            silentServerSlot = silentPreviousSlot;
         }
 
-        MC.player.connection.send(
-                new ServerboundSetCarriedItemPacket(slot)
-        );
+        Integer previousOwnerSlot = silentOwners.put(task, slot);
+
+        if (previousOwnerSlot != null
+                && previousOwnerSlot == slot
+                && silentServerSlot == slot) {
+            return;
+        }
+
+        if (silentServerSlot != slot) {
+            MC.player.connection.send(
+                    new ServerboundSetCarriedItemPacket(slot)
+            );
+
+            silentServerSlot = slot;
+        }
+    }
+
+    private void releaseSilentSwap(BlockBreakingTask task) {
+        if (task == null) {
+            return;
+        }
+
+        if (!silentOwners.containsKey(task)) {
+            return;
+        }
+
+        silentOwners.remove(task);
+
+        if (silentOwners.isEmpty()) {
+            restoreSilentSlot();
+            return;
+        }
+
+        int nextSlot = -1;
+
+        for (Integer slot : silentOwners.values()) {
+            nextSlot = slot;
+        }
+
+        if (nextSlot >= 0 && silentServerSlot != nextSlot) {
+            MC.player.connection.send(
+                    new ServerboundSetCarriedItemPacket(nextSlot)
+            );
+
+            silentServerSlot = nextSlot;
+        }
     }
 
     private void restoreSilentSlot() {
-        if (MC.player == null || silentPreviousSlot == -1) {
+        if (MC.player == null) {
+            silentOwners.clear();
+            silentPreviousSlot = -1;
+            silentServerSlot = -1;
+            return;
+        }
+
+        if (silentPreviousSlot == -1) {
+            silentOwners.clear();
+            silentServerSlot = -1;
             return;
         }
 
         int slot = silentPreviousSlot;
 
-        MC.player.connection.send(
-                new ServerboundSetCarriedItemPacket(slot)
-        );
+        if (silentServerSlot != slot) {
+            MC.player.connection.send(
+                    new ServerboundSetCarriedItemPacket(slot)
+            );
+        }
 
+        silentOwners.clear();
         silentPreviousSlot = -1;
+        silentServerSlot = -1;
+    }
+
+    private void clearSilentSwaps() {
+        restoreSilentSlot();
     }
 
     private void restoreDoubleMineSlot() {
@@ -875,9 +949,11 @@ public class SpeedMine extends Module {
 
         MC.player.getInventory().setSelectedSlot(slot);
 
-        MC.player.connection.send(
-                new ServerboundSetCarriedItemPacket(slot)
-        );
+        if (silentOwners.isEmpty()) {
+            MC.player.connection.send(
+                    new ServerboundSetCarriedItemPacket(slot)
+            );
+        }
 
         doubleMinePreviousSlot = -1;
     }
