@@ -4,6 +4,7 @@ agent:
   machine:
     type: f1-standard-2
     os_image: ubuntu2404
+
 blocks:
   - name: Build and Test
     task:
@@ -14,15 +15,34 @@ blocks:
             - sem-version java 21
             - java -version
             - chmod +x ./gradlew
-            - ./gradlew build || true
+
+            - ./gradlew compileJava || true
+
             - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
             - echo "Minecraft jar found at $MC_JAR"
-            - echo "=== BuiltInRegistries fields ==="
-            - 'if [ -n "$MC_JAR" ]; then javap -classpath "$MC_JAR" net.minecraft.core.registries.BuiltInRegistries 2>&1 | grep -E "ENCHANT|static final" | head -n 80; fi'
-            - echo "=== Registries fields ==="
-            - 'if [ -n "$MC_JAR" ]; then javap -classpath "$MC_JAR" net.minecraft.core.registries.Registries 2>&1 | grep -E "ENCHANT|static final" | head -n 80; fi'
-            - echo "=== ItemEnchantments#getLevel ==="
-            - 'if [ -n "$MC_JAR" ]; then javap -classpath "$MC_JAR" net.minecraft.world.item.enchantment.ItemEnchantments 2>&1 | grep -E "getLevel"; fi'
-            - echo "=== Enchantments keys ==="
-            - 'if [ -n "$MC_JAR" ]; then javap -classpath "$MC_JAR" net.minecraft.world.item.enchantment.Enchantments 2>&1 | grep -E "EFFICIENCY|AQUA_AFFINITY"; fi'
-            - artifact push workflow build/libs
+
+            - echo "=== ClientLevel methods ==="
+            - 'javap -classpath "$MC_JAR" net.minecraft.client.multiplayer.ClientLevel 2>&1 | grep -Ei "predict|sequence|pending|update" | head -n 100'
+
+            - echo "=== MultiPlayerGameMode methods ==="
+            - 'javap -classpath "$MC_JAR" net.minecraft.client.multiplayer.MultiPlayerGameMode 2>&1 | grep -Ei "predict|sequence|destroy|start|stop|block" | head -n 150'
+
+            - echo "=== Prediction package ==="
+            - 'jar tf "$MC_JAR" 2>/dev/null | grep "net/minecraft/client/multiplayer/prediction/" | head -n 100'
+
+            - echo "=== BlockStatePredictionHandler ==="
+            - 'javap -classpath "$MC_JAR" net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler 2>&1 | head -n 150'
+
+            - echo "=== PredictiveAction ==="
+            - 'javap -classpath "$MC_JAR" net.minecraft.client.multiplayer.prediction.PredictiveAction 2>&1 | head -n 150'
+
+            - echo "=== ClientPacketListener methods ==="
+            - 'javap -classpath "$MC_JAR" net.minecraft.client.multiplayer.ClientPacketListener 2>&1 | grep -Ei "sequence|predict|send|packet" | head -n 150'
+
+            - echo "=== PlayerActionPacket ==="
+            - 'javap -classpath "$MC_JAR" net.minecraft.network.protocol.game.ServerboundPlayerActionPacket 2>&1 | head -n 120'
+
+            - echo "=== Client jar prediction classes ==="
+            - 'find ~/.gradle/caches/fabric-loom/26.2 -type f -name "*.jar" -print'
+
+            - 'artifact push workflow build/libs'
