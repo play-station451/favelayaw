@@ -635,13 +635,8 @@ public class SpeedMine extends Module {
         task.markCompleted();
         task.markLastBroken();
 
-        // ★ FIX: Enable instant rebreak for the second block as well
-        if (instant.get()) {
-            task.markInstantRemine();
-            task.setProgress(task.getTargetSpeed());
-        }
-
         restoreDoubleMineSlot();
+
         doubleMineTask = null;
     }
 
@@ -835,11 +830,6 @@ public class SpeedMine extends Module {
 
             if (state.isAir()) {
                 doubleMineTask.markServerBroken();
-                // Also enable instant remine for the double mine task
-                if (instant.get()) {
-                    doubleMineTask.markInstantRemine();
-                    doubleMineTask.setProgress(doubleMineTask.getTargetSpeed());
-                }
                 doubleMineTask.setCompleted(false);
             }
         }
@@ -1105,8 +1095,7 @@ public class SpeedMine extends Module {
                         / hardness
                         / divisor;
 
-        // ★ FIX: Apply speed multiplier to BOTH main and double-mine tasks
-        if (task == currentTask || task == doubleMineTask) {
+        if (task == currentTask) {
             damage *= speed.getFloat();
         }
 
