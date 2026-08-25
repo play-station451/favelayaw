@@ -17,4 +17,12 @@ blocks:
             - ./gradlew build || true
             - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
             - echo "Minecraft jar found at $MC_JAR"
+            - echo "=== BuiltInRegistries fields ==="
+            - 'if [ -n "$MC_JAR" ]; then javap -classpath "$MC_JAR" net.minecraft.core.registries.BuiltInRegistries 2>&1 | grep -E "ENCHANT|static final" | head -n 80; fi'
+            - echo "=== Registries fields ==="
+            - 'if [ -n "$MC_JAR" ]; then javap -classpath "$MC_JAR" net.minecraft.core.registries.Registries 2>&1 | grep -E "ENCHANT|static final" | head -n 80; fi'
+            - echo "=== ItemEnchantments#getLevel ==="
+            - 'if [ -n "$MC_JAR" ]; then javap -classpath "$MC_JAR" net.minecraft.world.item.enchantment.ItemEnchantments 2>&1 | grep -E "getLevel"; fi'
+            - echo "=== Enchantments keys ==="
+            - 'if [ -n "$MC_JAR" ]; then javap -classpath "$MC_JAR" net.minecraft.world.item.enchantment.Enchantments 2>&1 | grep -E "EFFICIENCY|AQUA_AFFINITY"; fi'
             - artifact push workflow build/libs
