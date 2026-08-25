@@ -16,7 +16,7 @@ blocks:
             - java -version
             - chmod +x ./gradlew
 
-            - ./gradlew compileJava || true
+            - ./gradlew build || true
 
             - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
             - echo "Minecraft jar found at $MC_JAR"
