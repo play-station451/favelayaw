@@ -1,4 +1,3 @@
-```java
 package net.favela.yaw.impl.modules.categories.player;
 
 import com.google.auto.service.AutoService;
