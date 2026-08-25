@@ -26,6 +26,7 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -1105,6 +1106,10 @@ public class SpeedMine extends Module {
             BlockState state,
             BlockBreakingTask task
     ) {
+        if (state.getBlock() == Blocks.OBSIDIAN && isActive()) {
+            return true;
+        }
+
         if (!state.requiresCorrectToolForDrops()) {
             return true;
         }
@@ -1124,6 +1129,10 @@ public class SpeedMine extends Module {
             BlockState state,
             BlockBreakingTask task
     ) {
+        if (state.getBlock() == Blocks.OBSIDIAN && isActive()) {
+            return 1000.0f;
+        }
+
         if (MC.player == null) {
             return 1.0f;
         }
