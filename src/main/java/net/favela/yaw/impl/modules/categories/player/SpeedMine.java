@@ -177,6 +177,10 @@ public class SpeedMine extends Module {
             abortMining(currentTask);
         }
 
+        if (doubleMineTask != null && doubleMineTask.isStarted()) {
+            abortMining(doubleMineTask);
+        }
+
         currentTask = null;
         doubleMineTask = null;
 
@@ -228,12 +232,12 @@ public class SpeedMine extends Module {
             return;
         }
 
-        if (currentTask != null) {
-            renderTask(event, currentTask);
-        }
-
         if (doubleMineTask != null) {
             renderTask(event, doubleMineTask);
+        }
+
+        if (currentTask != null) {
+            renderTask(event, currentTask);
         }
     }
 
@@ -263,44 +267,34 @@ public class SpeedMine extends Module {
 
         event.cancel();
 
-        if (currentTask != null) {
+        BlockBreakingTask previousTask = currentTask;
+
+        if (previousTask != null) {
             if (doubleMine.get()
                     && doubleMineTask == null
-                    && currentTask.isStarted()
-                    && !currentTask.isInstantRemine()
-                    && currentTask.getBlockState() != null
-                    && !currentTask.getBlockState().isAir()) {
+                    && previousTask.isStarted()
+                    && !previousTask.isCompleted()) {
 
                 doubleMineTask = new BlockBreakingTask(
-                        currentTask.getBlockPos(),
-                        currentTask.getFacing(),
-                        1.0f
+                        previousTask.getBlockPos(),
+                        previousTask.getFacing(),
+                        previousTask.getTargetSpeed()
                 );
 
-                doubleMineTask.setProgress(
-                        currentTask.getProgress()
-                );
-
-                doubleMineTask.setToolSlot(
-                        getBestToolSlot(
-                                doubleMineTask.getStartState()
-                        )
-                );
+                doubleMineTask.copyStateFrom(previousTask);
+                doubleMineTask.setSecondary(true);
             }
 
-            abortMining(currentTask);
+            if (!previousTask.isCompleted()
+                    && !previousTask.isInstantRemine()) {
+                abortMining(previousTask);
+            }
         }
 
         currentTask = new BlockBreakingTask(
                 pos,
                 event.getDirection(),
                 speed.getFloat()
-        );
-
-        currentTask.setToolSlot(
-                getBestToolSlot(
-                        currentTask.getStartState()
-                )
         );
 
         instantRemineTimer.reset();
@@ -322,7 +316,8 @@ public class SpeedMine extends Module {
             return;
         }
 
-        int slot = task.getToolSlot();
+        int slot = getBestToolSlot(task.getStartState());
+        task.setToolSlot(slot);
 
         if (swap.get() == Swap.NORMAL && slot >= 0) {
             MC.player.getInventory().setSelectedSlot(slot);
@@ -354,6 +349,8 @@ public class SpeedMine extends Module {
         );
 
         task.markStarted();
+        task.setMiningStarted(true);
+        task.setLastKnownAir(false);
     }
 
     private void abortMining(BlockBreakingTask task) {
@@ -361,27 +358,10 @@ public class SpeedMine extends Module {
             return;
         }
 
-        if (!task.isStarted()) {
+        if (!task.isStarted()
+                || task.isCompleted()
+                || task.isInstantRemine()) {
             return;
-        }
-
-        if (task.isInstantRemine()) {
-            return;
-        }
-
-        if (task.getProgress() >= task.getTargetSpeed()) {
-            return;
-        }
-
-        if (task.getBlockState().isAir()) {
-            return;
-        }
-
-        if (grim.get()) {
-            sendDestroyPacket(
-                    ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
-                    task
-            );
         }
 
         if (swing.get()) {
@@ -392,6 +372,8 @@ public class SpeedMine extends Module {
                 ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK,
                 task
         );
+
+        task.setAborted(true);
     }
 
     private void handleCurrentTask(BlockBreakingTask task) {
@@ -402,8 +384,10 @@ public class SpeedMine extends Module {
         Vec3 eye = MC.player.getEyePosition();
         AABB box = new AABB(task.getBlockPos());
 
-        if (eye.distanceTo(closestPoint(eye, box)) > range.getDouble()) {
-            if (task == currentTask) {
+        if (eye.distanceTo(closestPoint(eye, box))
+                > range.getDouble()) {
+            if (task == currentTask
+                    && !task.isInstantRemine()) {
                 currentTask = null;
             }
 
@@ -414,15 +398,26 @@ public class SpeedMine extends Module {
 
         if (state.isAir()) {
             if (instant.get()) {
-                task.markInstantRemine();
-                task.setProgress(1.0f);
+                if (!task.isLastKnownAir()) {
+                    task.markInstantRemine();
+                    task.setLastKnownAir(true);
+                    task.setRemineWaiting(true);
+                    task.setRemineStarted(false);
+                    task.setCompleted(false);
+                    task.resetProgress();
+                    instantRemineResetTimer.reset();
+                }
             } else {
                 task.resetProgress();
+                return;
             }
+
+            return;
         }
 
-        if (swing.get()) {
-            MC.player.swing(InteractionHand.MAIN_HAND);
+        if (task.isInstantRemine()) {
+            handleInstantRemine(task);
+            return;
         }
 
         if (rotate.get() == Rotate.HOLD) {
@@ -435,9 +430,94 @@ public class SpeedMine extends Module {
                 task
         );
 
-        if (task.incrementProgress(damage) >= task.getTargetSpeed()
-                || task.isInstantRemine()) {
+        if (task.incrementProgress(damage)
+                >= task.getTargetSpeed()) {
             finishMining(task);
+        }
+    }
+
+    private void handleInstantRemine(BlockBreakingTask task) {
+        if (MC.player == null || MC.level == null) {
+            return;
+        }
+
+        if (!task.isRemineWaiting()) {
+            return;
+        }
+
+        if (!instantRemineTimer.passedMs(
+                instantDelay.getLong())) {
+            return;
+        }
+
+        BlockState state = task.getBlockState();
+
+        if (state.isAir()) {
+            return;
+        }
+
+        if (!task.isRemineStarted()) {
+            if (rotate.get() == Rotate.NORMAL) {
+                rotateServer(task.getBlockPos());
+            }
+
+            int slot = getBestToolSlot(task.getStartState());
+            task.setToolSlot(slot);
+
+            if (swap.get() == Swap.NORMAL && slot >= 0) {
+                MC.player.getInventory().setSelectedSlot(slot);
+            }
+
+            if (swap.get() == Swap.SILENT && slot >= 0) {
+                switchToSilent(slot);
+            }
+
+            if (grim.get()) {
+                sendDestroyPacket(
+                        ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
+                        task
+                );
+            }
+
+            sendDestroyPacket(
+                    ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
+                    task
+            );
+
+            task.setRemineStarted(true);
+            task.setCompleted(false);
+            task.setRemineWaiting(false);
+            task.setLastKnownAir(false);
+            task.resetProgress();
+
+            if (swing.get()) {
+                MC.player.swing(InteractionHand.MAIN_HAND);
+            }
+        }
+
+        if (!task.isRemineStarted()) {
+            return;
+        }
+
+        if (MC.level.getBlockState(
+                task.getBlockPos()
+        ).isAir()) {
+            return;
+        }
+
+        sendDestroyPacket(
+                ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
+                task
+        );
+
+        task.markCompleted();
+        task.markLastBroken();
+
+        instantRemineTimer.reset();
+        instantRemineResetTimer.reset();
+
+        if (swap.get() == Swap.SILENT) {
+            restoreSilentSlot();
         }
     }
 
@@ -447,6 +527,11 @@ public class SpeedMine extends Module {
         }
 
         if (!doubleMine.get()) {
+            cleanupDoubleMine();
+            return;
+        }
+
+        if (!task.isStarted()) {
             cleanupDoubleMine();
             return;
         }
@@ -466,14 +551,18 @@ public class SpeedMine extends Module {
             return;
         }
 
+        if (!multitask.get()
+                && MC.player.isUsingItem()) {
+            return;
+        }
+
         if (task.getBlockState().isAir()) {
             cleanupDoubleMine();
             return;
         }
 
-        if (!multitask.get()
-                && MC.player.isUsingItem()) {
-            return;
+        if (!task.isSecondaryStarted()) {
+            startDoubleMine(task);
         }
 
         float damage = calculateBlockDamage(
@@ -484,37 +573,113 @@ public class SpeedMine extends Module {
 
         if (task.incrementProgress(damage)
                 >= task.getTargetSpeed()) {
+            finishDoubleMine(task);
+        }
+    }
 
-            int slot = task.getToolSlot();
+    private void startDoubleMine(BlockBreakingTask task) {
+        if (MC.player == null || MC.level == null) {
+            return;
+        }
 
-            if (slot < 0) {
-                slot = getBestToolSlot(
-                        task.getStartState()
-                );
-                task.setToolSlot(slot);
-            }
+        int slot = getBestToolSlot(task.getStartState());
+        task.setToolSlot(slot);
 
+        if (slot >= 0) {
             if (doubleMinePreviousSlot == -1) {
                 doubleMinePreviousSlot =
-                        MC.player.getInventory()
-                                .getSelectedSlot();
+                        MC.player.getInventory().getSelectedSlot();
             }
 
-            if (slot >= 0) {
-                if (swap.get() == Swap.NORMAL) {
-                    MC.player.getInventory()
-                            .setSelectedSlot(slot);
-                } else if (swap.get() == Swap.SILENT) {
-                    MC.player.connection.send(
-                            new ServerboundSetCarriedItemPacket(slot)
-                    );
-                }
+            if (swap.get() == Swap.NORMAL) {
+                MC.player.getInventory().setSelectedSlot(slot);
+            } else if (swap.get() == Swap.SILENT) {
+                MC.player.connection.send(
+                        new ServerboundSetCarriedItemPacket(slot)
+                );
+            }
+        }
+
+        if (rotate.get() != Rotate.NONE) {
+            rotateServer(task.getBlockPos());
+        }
+
+        sendDestroyPacket(
+                ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
+                task
+        );
+
+        task.setSecondaryStarted(true);
+    }
+
+    private void finishDoubleMine(BlockBreakingTask task) {
+        if (MC.player == null || MC.level == null) {
+            return;
+        }
+
+        if (task.isCompleted()) {
+            cleanupDoubleMine();
+            return;
+        }
+
+        if (rotate.get() != Rotate.NONE) {
+            rotateServer(task.getBlockPos());
+        }
+
+        int slot = getBestToolSlot(task.getStartState());
+        task.setToolSlot(slot);
+
+        if (slot >= 0) {
+            if (doubleMinePreviousSlot == -1) {
+                doubleMinePreviousSlot =
+                        MC.player.getInventory().getSelectedSlot();
             }
 
-            task.setDoublemineHoldTicks(
-                    task.getDoublemineHoldTicks() + 1
+            if (swap.get() == Swap.NORMAL) {
+                MC.player.getInventory().setSelectedSlot(slot);
+            } else if (swap.get() == Swap.SILENT) {
+                MC.player.connection.send(
+                        new ServerboundSetCarriedItemPacket(slot)
+                );
+            }
+        }
+
+        if (!task.isSecondaryStarted()) {
+            sendDestroyPacket(
+                    ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
+                    task
+            );
+
+            task.setSecondaryStarted(true);
+        }
+
+        if (grim.get()) {
+            sendDestroyPacket(
+                    ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
+                    task
             );
         }
+
+        if (swing.get()) {
+            MC.player.swing(InteractionHand.MAIN_HAND);
+        }
+
+        sendDestroyPacket(
+                ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
+                task
+        );
+
+        task.markCompleted();
+        task.markLastBroken();
+
+        restoreDoubleMineSlot();
+
+        doubleMineTask = null;
+    }
+
+    private void cleanupDoubleMine() {
+        doubleMineTask = null;
+        restoreDoubleMineSlot();
     }
 
     private void finishMining(BlockBreakingTask task) {
@@ -526,51 +691,44 @@ public class SpeedMine extends Module {
             return;
         }
 
-        if (!multitask.get()
-                && MC.player.isUsingItem()) {
+        if (task.isInstantRemine()) {
+            task.markInstantRemine();
+            task.setRemineWaiting(true);
+            task.setRemineStarted(false);
+            task.setCompleted(false);
+            task.setLastKnownAir(true);
+            task.resetProgress();
+
+            instantRemineResetTimer.reset();
+
+            if (swap.get() == Swap.SILENT) {
+                restoreSilentSlot();
+            }
+
             return;
         }
 
-        if (task.getBrokenCount()
-                != task.getLastBrokenCount()) {
-            instantRemineResetTimer.reset();
+        if (task.isCompleted()) {
+            return;
         }
 
-        if (task.isInstantRemine()) {
-            if (!instantRemineTimer.passedMs(
-                    instantDelay.getLong()
-            )) {
-                return;
-            }
-
-            if (task.getBlockState().isAir()
-                    && instantRemineResetTimer.passedMs(250L)) {
-                return;
-            }
+        if (!multitask.get()
+                && MC.player.isUsingItem()) {
+            return;
         }
 
         if (rotate.get() == Rotate.NORMAL) {
             rotateServer(task.getBlockPos());
         }
 
-        int slot = task.getToolSlot();
+        int slot = getBestToolSlot(task.getStartState());
+        task.setToolSlot(slot);
 
-        if (slot < 0) {
-            slot = getBestToolSlot(
-                    task.getStartState()
-            );
-
-            task.setToolSlot(slot);
+        if (swap.get() == Swap.NORMAL && slot >= 0) {
+            MC.player.getInventory().setSelectedSlot(slot);
         }
 
-        if (swap.get() == Swap.NORMAL
-                && slot >= 0) {
-            MC.player.getInventory()
-                    .setSelectedSlot(slot);
-        }
-
-        if (swap.get() == Swap.SILENT
-                && slot >= 0) {
+        if (swap.get() == Swap.SILENT && slot >= 0) {
             switchToSilent(slot);
         }
 
@@ -582,9 +740,7 @@ public class SpeedMine extends Module {
         }
 
         if (swing.get()) {
-            MC.player.swing(
-                    InteractionHand.MAIN_HAND
-            );
+            MC.player.swing(InteractionHand.MAIN_HAND);
         }
 
         sendDestroyPacket(
@@ -592,31 +748,21 @@ public class SpeedMine extends Module {
                 task
         );
 
-        if (simulate.get()
-                && !task.getBlockState().isAir()) {
-            MC.level.destroyBlock(
-                    task.getBlockPos(),
-                    false,
-                    MC.player,
-                    512
-            );
-        }
-
+        task.markCompleted();
         task.markLastBroken();
 
-        if (task.isInstantRemine()) {
-            instantRemineTimer.reset();
+        if (simulate.get()
+                && !task.getBlockState().isAir()) {
+            task.setClientSimulated(true);
         }
 
-        if (!task.isInstantRemine()
-                && swap.get() == Swap.SILENT) {
+        if (swap.get() == Swap.SILENT) {
             restoreSilentSlot();
         }
     }
 
     private void onPacketReceive(PacketEvent.Receive event) {
-        if (MC.level == null
-                || MC.player == null) {
+        if (MC.level == null || MC.player == null) {
             return;
         }
 
@@ -626,29 +772,51 @@ public class SpeedMine extends Module {
         }
 
         BlockPos pos = packet.getPos();
+        BlockState state = packet.getBlockState();
 
         if (currentTask != null
-                && currentTask.getBlockPos()
-                .equals(pos)) {
+                && currentTask.getBlockPos().equals(pos)) {
 
-            currentTask.markBroken();
+            BlockBreakingTask task = currentTask;
 
-            if (!packet.getBlockState().isAir()) {
-                currentTask.setStartState(
-                        packet.getBlockState()
-                );
+            if (state.isAir()) {
+                task.markBroken();
+                task.markServerBroken();
+                task.markInstantRemine();
+                task.setLastKnownAir(true);
+                task.setRemineWaiting(true);
+                task.setRemineStarted(false);
+                task.setCompleted(false);
+                task.resetProgress();
+
+                instantRemineResetTimer.reset();
+                return;
+            }
+
+            if (task.isInstantRemine()
+                    && task.isLastKnownAir()) {
+
+                task.setLastKnownAir(false);
+                task.setRemineWaiting(true);
+                task.setRemineStarted(false);
+                task.setCompleted(false);
+                task.resetProgress();
+
+                instantRemineResetTimer.reset();
+                return;
+            }
+
+            if (!state.isAir()) {
+                task.setLastKnownAir(false);
             }
         }
 
         if (doubleMineTask != null
-                && doubleMineTask.getBlockPos()
-                .equals(pos)) {
+                && doubleMineTask.getBlockPos().equals(pos)) {
 
-            doubleMineTask.markBroken();
-
-            if (packet.getBlockState().isAir()) {
-                doubleMineTask = null;
-                restoreDoubleMineSlot();
+            if (state.isAir()) {
+                doubleMineTask.markBroken();
+                doubleMineTask.markServerBroken();
             }
         }
     }
@@ -685,32 +853,20 @@ public class SpeedMine extends Module {
                 new AABB(pos)
         );
 
-        double dx =
-                target.x - MC.player.getX();
-
-        double dy =
-                target.y - MC.player.getEyeY();
-
-        double dz =
-                target.z - MC.player.getZ();
+        double dx = target.x - MC.player.getX();
+        double dy = target.y - MC.player.getEyeY();
+        double dz = target.z - MC.player.getZ();
 
         double horizontal =
-                Math.sqrt(
-                        dx * dx + dz * dz
-                );
+                Math.sqrt(dx * dx + dz * dz);
 
-        float yaw =
-                (float) Math.toDegrees(
-                        Math.atan2(dz, dx)
-                ) - 90.0f;
+        float yaw = (float) Math.toDegrees(
+                Math.atan2(dz, dx)
+        ) - 90.0f;
 
-        float pitch =
-                (float) -Math.toDegrees(
-                        Math.atan2(
-                                dy,
-                                horizontal
-                        )
-                );
+        float pitch = (float) -Math.toDegrees(
+                Math.atan2(dy, horizontal)
+        );
 
         MC.player.connection.send(
                 new ServerboundMovePlayerPacket.Rot(
@@ -728,8 +884,7 @@ public class SpeedMine extends Module {
         }
 
         int current =
-                MC.player.getInventory()
-                        .getSelectedSlot();
+                MC.player.getInventory().getSelectedSlot();
 
         if (current == slot) {
             return;
@@ -750,26 +905,28 @@ public class SpeedMine extends Module {
             return;
         }
 
+        int slot = silentPreviousSlot;
+
         MC.player.connection.send(
-                new ServerboundSetCarriedItemPacket(
-                        silentPreviousSlot
-                )
+                new ServerboundSetCarriedItemPacket(slot)
         );
 
         silentPreviousSlot = -1;
     }
 
     private void restoreDoubleMineSlot() {
-        if (MC.player == null
-                || doubleMinePreviousSlot == -1) {
+        if (MC.player == null) {
             doubleMinePreviousSlot = -1;
+            return;
+        }
+
+        if (doubleMinePreviousSlot == -1) {
             return;
         }
 
         int slot = doubleMinePreviousSlot;
 
-        MC.player.getInventory()
-                .setSelectedSlot(slot);
+        MC.player.getInventory().setSelectedSlot(slot);
 
         MC.player.connection.send(
                 new ServerboundSetCarriedItemPacket(slot)
@@ -778,36 +935,26 @@ public class SpeedMine extends Module {
         doubleMinePreviousSlot = -1;
     }
 
-    private void cleanupDoubleMine() {
-        doubleMineTask = null;
-        restoreDoubleMineSlot();
-    }
-
     private int getBestToolSlot(BlockState state) {
         if (MC.player == null) {
             return -1;
         }
 
         int bestSlot =
-                MC.player.getInventory()
-                        .getSelectedSlot();
+                MC.player.getInventory().getSelectedSlot();
 
         float bestSpeed = 1.0f;
 
         for (int slot = 0; slot < 9; slot++) {
             ItemStack stack =
-                    MC.player.getInventory()
-                            .getItem(slot);
+                    MC.player.getInventory().getItem(slot);
 
             if (stack.isEmpty()) {
                 continue;
             }
 
             float toolSpeed =
-                    getToolSpeed(
-                            stack,
-                            state
-                    );
+                    getToolSpeed(stack, state);
 
             if (toolSpeed > bestSpeed) {
                 bestSpeed = toolSpeed;
@@ -866,9 +1013,7 @@ public class SpeedMine extends Module {
         }
     }
 
-    private boolean hasAquaAffinity(
-            ItemStack stack
-    ) {
+    private boolean hasAquaAffinity(ItemStack stack) {
         if (MC.level == null) {
             return false;
         }
@@ -911,25 +1056,37 @@ public class SpeedMine extends Module {
         }
 
         int divisor =
-                canHarvest(state)
+                canHarvest(state, task)
                         ? 30
                         : 100;
 
-        return getMiningSpeed(
-                state,
-                task
-        ) / hardness / divisor;
+        float miningSpeed =
+                getMiningSpeed(state, task);
+
+        float damage =
+                miningSpeed
+                        / hardness
+                        / divisor;
+
+        if (task == currentTask) {
+            damage *= speed.getFloat();
+        }
+
+        return damage;
     }
 
     private boolean canHarvest(
-            BlockState state
+            BlockState state,
+            BlockBreakingTask task
     ) {
         if (!state.requiresCorrectToolForDrops()) {
             return true;
         }
 
         int slot =
-                getBestToolSlot(state);
+                task.getToolSlot() >= 0
+                        ? task.getToolSlot()
+                        : getBestToolSlot(state);
 
         if (slot < 0) {
             return false;
@@ -951,19 +1108,14 @@ public class SpeedMine extends Module {
         ItemStack stack;
 
         if (task.getToolSlot() >= 0) {
-            stack =
-                    MC.player.getInventory()
-                            .getItem(
-                                    task.getToolSlot()
-                            );
+            stack = MC.player.getInventory()
+                    .getItem(task.getToolSlot());
         } else {
-            stack =
-                    MC.player.getMainHandItem();
+            stack = MC.player.getMainHandItem();
         }
 
         if (stack.isEmpty()) {
-            stack =
-                    MC.player.getMainHandItem();
+            stack = MC.player.getMainHandItem();
         }
 
         float miningSpeed =
@@ -1033,21 +1185,9 @@ public class SpeedMine extends Module {
             AABB box
     ) {
         return new Vec3(
-                clamp(
-                        point.x,
-                        box.minX,
-                        box.maxX
-                ),
-                clamp(
-                        point.y,
-                        box.minY,
-                        box.maxY
-                ),
-                clamp(
-                        point.z,
-                        box.minZ,
-                        box.maxZ
-                )
+                clamp(point.x, box.minX, box.maxX),
+                clamp(point.y, box.minY, box.maxY),
+                clamp(point.z, box.minZ, box.maxZ)
         );
     }
 
@@ -1075,11 +1215,6 @@ public class SpeedMine extends Module {
 
         BlockState currentState =
                 MC.level.getBlockState(pos);
-
-        if (currentState.isAir()
-                && !task.isInstantRemine()) {
-            return;
-        }
 
         BlockState renderState =
                 currentState.isAir()
@@ -1139,6 +1274,11 @@ public class SpeedMine extends Module {
                         )
                 );
 
+        if (task.isServerBroken()
+                && !task.isRemineStarted()) {
+            scale = 1.0f;
+        }
+
         double dx =
                 (bounds.maxX - bounds.minX)
                         * 0.5;
@@ -1169,7 +1309,8 @@ public class SpeedMine extends Module {
 
         int green =
                 (int) (
-                        200.0f * scale
+                        200.0f
+                                * scale
                 );
 
         RenderUtil.drawBoxOutline(
@@ -1197,12 +1338,24 @@ public class SpeedMine extends Module {
 
         private boolean instantRemine;
         private boolean started;
+        private boolean aborted;
+        private boolean completed;
+
+        private boolean secondary;
+        private boolean secondaryStarted;
+        private boolean remineStarted;
+        private boolean remineWaiting;
+        private boolean miningStarted;
+        private boolean serverBroken;
+        private boolean clientSimulated;
+        private boolean lastKnownAir;
+
+        private int toolSlot = -1;
 
         private int brokenCount;
         private int lastBrokenCount = -1;
 
         private int doublemineHoldTicks;
-        private int toolSlot = -1;
 
         public BlockBreakingTask(
                 BlockPos blockPos,
@@ -1213,7 +1366,8 @@ public class SpeedMine extends Module {
                     blockPos.immutable();
 
             this.facing = facing;
-            this.targetSpeed = targetSpeed;
+            this.targetSpeed =
+                    targetSpeed;
 
             this.startState =
                     MC.level.getBlockState(
@@ -1244,16 +1398,23 @@ public class SpeedMine extends Module {
         }
 
         public BlockState getStartState() {
-            return startState;
-        }
+            if (MC.level != null) {
+                BlockState state =
+                        MC.level.getBlockState(
+                                blockPos
+                        );
 
-        public void setStartState(
-                BlockState state
-        ) {
-            if (state != null
-                    && !state.isAir()) {
-                startState = state;
+                if (!state.isAir()
+                        && (
+                        startState == null
+                                || state.getBlock()
+                                != startState.getBlock()
+                )) {
+                    startState = state;
+                }
             }
+
+            return startState;
         }
 
         public boolean isStarted() {
@@ -1291,8 +1452,11 @@ public class SpeedMine extends Module {
         }
 
         public void resetProgress() {
-            previousProgress = 0.0f;
-            progress = 0.0f;
+            previousProgress =
+                    0.0f;
+
+            progress =
+                    0.0f;
         }
 
         public float incrementProgress(
@@ -1304,7 +1468,8 @@ public class SpeedMine extends Module {
             progress += amount;
 
             if (progress > targetSpeed) {
-                progress = targetSpeed;
+                progress =
+                        targetSpeed;
             }
 
             return progress;
@@ -1338,6 +1503,99 @@ public class SpeedMine extends Module {
                     ticks;
         }
 
+        public boolean isCompleted() {
+            return completed;
+        }
+
+        public void markCompleted() {
+            completed = true;
+        }
+
+        public boolean isAborted() {
+            return aborted;
+        }
+
+        public void setAborted(
+                boolean aborted
+        ) {
+            this.aborted =
+                    aborted;
+        }
+
+        public boolean isSecondary() {
+            return secondary;
+        }
+
+        public void setSecondary(
+                boolean secondary
+        ) {
+            this.secondary =
+                    secondary;
+        }
+
+        public boolean isSecondaryStarted() {
+            return secondaryStarted;
+        }
+
+        public void setSecondaryStarted(
+                boolean secondaryStarted
+        ) {
+            this.secondaryStarted =
+                    secondaryStarted;
+        }
+
+        public boolean isRemineStarted() {
+            return remineStarted;
+        }
+
+        public void setRemineStarted(
+                boolean remineStarted
+        ) {
+            this.remineStarted =
+                    remineStarted;
+        }
+
+        public boolean isRemineWaiting() {
+            return remineWaiting;
+        }
+
+        public void setRemineWaiting(
+                boolean remineWaiting
+        ) {
+            this.remineWaiting =
+                    remineWaiting;
+        }
+
+        public boolean isMiningStarted() {
+            return miningStarted;
+        }
+
+        public void setMiningStarted(
+                boolean miningStarted
+        ) {
+            this.miningStarted =
+                    miningStarted;
+        }
+
+        public boolean isServerBroken() {
+            return serverBroken;
+        }
+
+        public void markServerBroken() {
+            serverBroken = true;
+        }
+
+        public boolean isClientSimulated() {
+            return clientSimulated;
+        }
+
+        public void setClientSimulated(
+                boolean clientSimulated
+        ) {
+            this.clientSimulated =
+                    clientSimulated;
+        }
+
         public int getToolSlot() {
             return toolSlot;
         }
@@ -1347,6 +1605,57 @@ public class SpeedMine extends Module {
         ) {
             this.toolSlot =
                     toolSlot;
+        }
+
+        public boolean isLastKnownAir() {
+            return lastKnownAir;
+        }
+
+        public void setLastKnownAir(
+                boolean lastKnownAir
+        ) {
+            this.lastKnownAir =
+                    lastKnownAir;
+        }
+
+        public void copyStateFrom(
+                BlockBreakingTask other
+        ) {
+            this.startState =
+                    other.startState;
+
+            this.progress =
+                    other.progress;
+
+            this.previousProgress =
+                    other.previousProgress;
+
+            this.instantRemine =
+                    other.instantRemine;
+
+            this.started =
+                    other.started;
+
+            this.aborted = false;
+            this.completed = false;
+
+            this.brokenCount =
+                    other.brokenCount;
+
+            this.lastBrokenCount =
+                    other.lastBrokenCount;
+
+            this.toolSlot =
+                    other.toolSlot;
+
+            this.lastKnownAir =
+                    other.lastKnownAir;
+
+            this.remineStarted =
+                    false;
+
+            this.remineWaiting =
+                    false;
         }
     }
 }
