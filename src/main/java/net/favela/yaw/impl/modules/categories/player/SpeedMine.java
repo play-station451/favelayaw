@@ -13,7 +13,6 @@ import net.favela.yaw.impl.setting.settings.NumberSetting;
 import net.favela.yaw.impl.util.models.Timer;
 import net.favela.yaw.impl.util.render.RenderUtil;
 import net.favela.yaw.mixin.MultiPlayerGameModeAccessor;
-import net.minecraft.client.multiplayer.prediction.PredictiveAction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.Registries;
@@ -213,8 +212,7 @@ public class SpeedMine extends Module {
             return;
         }
 
-        if (currentTask != null
-                && rotate.get() == Rotate.HOLD) {
+        if (currentTask != null && rotate.get() == Rotate.HOLD) {
             rotateServer(currentTask.getBlockPos());
         }
     }
@@ -246,17 +244,17 @@ public class SpeedMine extends Module {
             return;
         }
 
+        if (currentTask != null && currentTask.getBlockPos().equals(pos)) {
+            event.cancel();
+            return;
+        }
+
+        if (doubleMineTask != null && doubleMineTask.getBlockPos().equals(pos)) {
+            event.cancel();
+            return;
+        }
+
         event.cancel();
-
-        if (currentTask != null
-                && currentTask.getBlockPos().equals(pos)) {
-            return;
-        }
-
-        if (doubleMineTask != null
-                && doubleMineTask.getBlockPos().equals(pos)) {
-            return;
-        }
 
         if (currentTask != null) {
             if (doubleMine.get() && doubleMineTask == null) {
@@ -368,12 +366,7 @@ public class SpeedMine extends Module {
         Vec3 eye = MC.player.getEyePosition();
         AABB box = new AABB(task.getBlockPos());
 
-        if (eye.distanceTo(
-                closestPoint(
-                        eye,
-                        box
-                )
-        ) > range.getDouble()) {
+        if (eye.distanceTo(closestPoint(eye, box)) > range.getDouble()) {
             if (task == currentTask) {
                 currentTask = null;
             }
@@ -402,16 +395,13 @@ public class SpeedMine extends Module {
                 task.getBlockPos()
         );
 
-        if (task.incrementProgress(damage)
-                >= task.getTargetSpeed()
+        if (task.incrementProgress(damage) >= task.getTargetSpeed()
                 || task.isInstantRemine()) {
             finishMining(task);
         }
     }
 
-    private void handleDoubleMineTask(
-            BlockBreakingTask task
-    ) {
+    private void handleDoubleMineTask(BlockBreakingTask task) {
         if (MC.player == null || MC.level == null) {
             return;
         }
@@ -429,14 +419,9 @@ public class SpeedMine extends Module {
         }
 
         Vec3 eye = MC.player.getEyePosition();
-        AABB box = new AABB(task.getBlockPos());
+        AABB blockBox = new AABB(task.getBlockPos());
 
-        if (eye.distanceTo(
-                closestPoint(
-                        eye,
-                        box
-                )
-        ) > range.getDouble()) {
+        if (eye.distanceTo(closestPoint(eye, blockBox)) > range.getDouble()) {
             doubleMineTask = null;
             restoreDoubleMineSlot();
             return;
@@ -448,8 +433,7 @@ public class SpeedMine extends Module {
             return;
         }
 
-        if (!multitask.get()
-                && MC.player.isUsingItem()) {
+        if (!multitask.get() && MC.player.isUsingItem()) {
             return;
         }
 
@@ -458,12 +442,8 @@ public class SpeedMine extends Module {
                 task.getBlockPos()
         );
 
-        if (task.incrementProgress(damage)
-                >= task.getTargetSpeed()) {
-
-            int slot = getBestToolSlot(
-                    task.getStartState()
-            );
+        if (task.incrementProgress(damage) >= task.getTargetSpeed()) {
+            int slot = getBestToolSlot(task.getStartState());
 
             if (slot < 0) {
                 return;
@@ -471,12 +451,16 @@ public class SpeedMine extends Module {
 
             if (doubleMinePreviousSlot == -1) {
                 doubleMinePreviousSlot =
-                        MC.player.getInventory()
-                                .getSelectedSlot();
+                        MC.player.getInventory().getSelectedSlot();
             }
 
-            MC.player.getInventory()
-                    .setSelectedSlot(slot);
+            if (MC.player.getInventory().getSelectedSlot() != slot) {
+                MC.player.getInventory().setSelectedSlot(slot);
+
+                MC.player.connection.send(
+                        new ServerboundSetCarriedItemPacket(slot)
+                );
+            }
 
             task.setDoublemineHoldTicks(
                     task.getDoublemineHoldTicks() + 1
@@ -493,20 +477,16 @@ public class SpeedMine extends Module {
             return;
         }
 
-        if (!multitask.get()
-                && MC.player.isUsingItem()) {
+        if (!multitask.get() && MC.player.isUsingItem()) {
             return;
         }
 
-        if (task.getBrokenCount()
-                != task.getLastBrokenCount()) {
+        if (task.getBrokenCount() != task.getLastBrokenCount()) {
             instantRemineResetTimer.reset();
         }
 
         if (task.isInstantRemine()) {
-            if (!instantRemineTimer.passedMs(
-                    instantDelay.getLong()
-            )) {
+            if (!instantRemineTimer.passedMs(instantDelay.getLong())) {
                 return;
             }
 
@@ -520,18 +500,13 @@ public class SpeedMine extends Module {
             rotateServer(task.getBlockPos());
         }
 
-        int slot = getBestToolSlot(
-                task.getStartState()
-        );
+        int slot = getBestToolSlot(task.getStartState());
 
-        if (swap.get() == Swap.NORMAL
-                && slot >= 0) {
-            MC.player.getInventory()
-                    .setSelectedSlot(slot);
+        if (swap.get() == Swap.NORMAL && slot >= 0) {
+            MC.player.getInventory().setSelectedSlot(slot);
         }
 
-        if (swap.get() == Swap.SILENT
-                && slot >= 0) {
+        if (swap.get() == Swap.SILENT && slot >= 0) {
             switchToSilent(slot);
         }
 
@@ -551,8 +526,7 @@ public class SpeedMine extends Module {
                 task
         );
 
-        if (simulate.get()
-                && !task.getBlockState().isAir()) {
+        if (simulate.get() && !task.getBlockState().isAir()) {
             MC.level.destroyBlock(
                     task.getBlockPos(),
                     false,
@@ -566,6 +540,26 @@ public class SpeedMine extends Module {
         if (task.isInstantRemine()) {
             instantRemineTimer.reset();
         }
+    }
+
+    private void onPacketReceive(PacketEvent.Receive event) {
+        if (MC.level == null || MC.player == null) {
+            return;
+        }
+
+        if (!(event.packet() instanceof ClientboundBlockUpdatePacket packet)) {
+            return;
+        }
+
+        if (currentTask == null) {
+            return;
+        }
+
+        if (!packet.getPos().equals(currentTask.getBlockPos())) {
+            return;
+        }
+
+        currentTask.markBroken();
     }
 
     private void sendDestroyPacket(
@@ -590,29 +584,6 @@ public class SpeedMine extends Module {
                 );
     }
 
-    private void onPacketReceive(PacketEvent.Receive event) {
-        if (MC.level == null || MC.player == null) {
-            return;
-        }
-
-        if (!(event.packet()
-                instanceof ClientboundBlockUpdatePacket packet)) {
-            return;
-        }
-
-        if (currentTask == null) {
-            return;
-        }
-
-        if (!packet.getPos().equals(
-                currentTask.getBlockPos()
-        )) {
-            return;
-        }
-
-        currentTask.markBroken();
-    }
-
     private void rotateServer(BlockPos pos) {
         if (MC.player == null) {
             return;
@@ -627,21 +598,15 @@ public class SpeedMine extends Module {
         double dy = target.y - MC.player.getEyeY();
         double dz = target.z - MC.player.getZ();
 
-        double horizontal =
-                Math.sqrt(dx * dx + dz * dz);
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
 
-        float yaw =
-                (float) Math.toDegrees(
-                        Math.atan2(dz, dx)
-                ) - 90.0f;
+        float yaw = (float) Math.toDegrees(
+                Math.atan2(dz, dx)
+        ) - 90.0f;
 
-        float pitch =
-                (float) -Math.toDegrees(
-                        Math.atan2(
-                                dy,
-                                horizontal
-                        )
-                );
+        float pitch = (float) -Math.toDegrees(
+                Math.atan2(dy, horizontal)
+        );
 
         MC.player.connection.send(
                 new ServerboundMovePlayerPacket.Rot(
@@ -675,11 +640,7 @@ public class SpeedMine extends Module {
     }
 
     private void restoreSilentSlot() {
-        if (MC.player == null) {
-            return;
-        }
-
-        if (silentPreviousSlot == -1) {
+        if (MC.player == null || silentPreviousSlot == -1) {
             return;
         }
 
@@ -702,41 +663,37 @@ public class SpeedMine extends Module {
             return;
         }
 
-        MC.player.getInventory()
-                .setSelectedSlot(
-                        doubleMinePreviousSlot
-                );
+        int slot = doubleMinePreviousSlot;
+
+        MC.player.getInventory().setSelectedSlot(slot);
+
+        MC.player.connection.send(
+                new ServerboundSetCarriedItemPacket(slot)
+        );
 
         doubleMinePreviousSlot = -1;
     }
 
-    private int getBestToolSlot(
-            BlockState state
-    ) {
+    private int getBestToolSlot(BlockState state) {
         if (MC.player == null) {
             return -1;
         }
 
         int bestSlot =
-                MC.player.getInventory()
-                        .getSelectedSlot();
+                MC.player.getInventory().getSelectedSlot();
 
         float bestSpeed = 1.0f;
 
         for (int slot = 0; slot < 9; slot++) {
             ItemStack stack =
-                    MC.player.getInventory()
-                            .getItem(slot);
+                    MC.player.getInventory().getItem(slot);
 
             if (stack.isEmpty()) {
                 continue;
             }
 
             float toolSpeed =
-                    getToolSpeed(
-                            stack,
-                            state
-                    );
+                    getToolSpeed(stack, state);
 
             if (toolSpeed > bestSpeed) {
                 bestSpeed = toolSpeed;
@@ -756,15 +713,10 @@ public class SpeedMine extends Module {
         }
 
         return stack.getDestroySpeed(state)
-                * (
-                1.0f
-                        + getEfficiency(stack) * 0.2f
-        );
+                * (1.0f + getEfficiency(stack) * 0.2f);
     }
 
-    private int getEfficiency(
-            ItemStack stack
-    ) {
+    private int getEfficiency(ItemStack stack) {
         if (MC.level == null) {
             return 0;
         }
@@ -786,9 +738,7 @@ public class SpeedMine extends Module {
         }
     }
 
-    private boolean hasAquaAffinity(
-            ItemStack stack
-    ) {
+    private boolean hasAquaAffinity(ItemStack stack) {
         if (MC.level == null) {
             return false;
         }
@@ -815,59 +765,45 @@ public class SpeedMine extends Module {
             BlockPos pos
     ) {
         float hardness =
-                state.getDestroySpeed(
-                        MC.level,
-                        pos
-                );
+                state.getDestroySpeed(MC.level, pos);
 
         if (hardness < 0.0f) {
             return 0.0f;
         }
 
         int divisor =
-                canHarvest(state)
-                        ? 30
-                        : 100;
+                canHarvest(state) ? 30 : 100;
 
         return getMiningSpeed(state)
                 / hardness
                 / divisor;
     }
 
-    private boolean canHarvest(
-            BlockState state
-    ) {
+    private boolean canHarvest(BlockState state) {
         if (!state.requiresCorrectToolForDrops()) {
             return true;
         }
 
-        int slot =
-                getBestToolSlot(state);
+        int slot = getBestToolSlot(state);
 
         if (slot < 0) {
             return false;
         }
 
-        return MC.player
-                .getInventory()
+        return MC.player.getInventory()
                 .getItem(slot)
                 .isCorrectToolForDrops(state);
     }
 
-    private float getMiningSpeed(
-            BlockState state
-    ) {
+    private float getMiningSpeed(BlockState state) {
         ItemStack stack =
                 MC.player.getMainHandItem();
 
         if (swap.get() == Swap.SILENT) {
-            int slot =
-                    getBestToolSlot(state);
+            int slot = getBestToolSlot(state);
 
             if (slot >= 0) {
-                stack =
-                        MC.player.getInventory()
-                                .getItem(slot);
+                stack = MC.player.getInventory().getItem(slot);
             }
         }
 
@@ -875,8 +811,7 @@ public class SpeedMine extends Module {
                 stack.getDestroySpeed(state);
 
         if (miningSpeed > 1.0f) {
-            int efficiency =
-                    getEfficiency(stack);
+            int efficiency = getEfficiency(stack);
 
             if (efficiency > 0) {
                 miningSpeed +=
@@ -884,14 +819,11 @@ public class SpeedMine extends Module {
             }
         }
 
-        if (MC.player.hasEffect(
-                MobEffects.HASTE
-        )) {
+        if (MC.player.hasEffect(MobEffects.HASTE)) {
             int amplifier =
                     MC.player.getEffect(
-                                    MobEffects.HASTE
-                            )
-                            .getAmplifier() + 1;
+                            MobEffects.HASTE
+                    ).getAmplifier() + 1;
 
             miningSpeed *=
                     1.0f + amplifier * 0.2f;
@@ -902,9 +834,8 @@ public class SpeedMine extends Module {
         )) {
             int amplifier =
                     MC.player.getEffect(
-                                    MobEffects.MINING_FATIGUE
-                            )
-                            .getAmplifier();
+                            MobEffects.MINING_FATIGUE
+                    ).getAmplifier();
 
             miningSpeed *= switch (amplifier) {
                 case 0 -> 0.3f;
@@ -914,9 +845,8 @@ public class SpeedMine extends Module {
             };
         }
 
-        if (MC.player.isEyeInFluid(
-                FluidTags.WATER
-        ) && !hasAquaAffinity(
+        if (MC.player.isEyeInFluid(FluidTags.WATER)
+                && !hasAquaAffinity(
                 MC.player.getItemBySlot(
                         EquipmentSlot.HEAD
                 )
@@ -936,21 +866,9 @@ public class SpeedMine extends Module {
             AABB box
     ) {
         return new Vec3(
-                clamp(
-                        point.x,
-                        box.minX,
-                        box.maxX
-                ),
-                clamp(
-                        point.y,
-                        box.minY,
-                        box.maxY
-                ),
-                clamp(
-                        point.z,
-                        box.minZ,
-                        box.maxZ
-                )
+                clamp(point.x, box.minX, box.maxX),
+                clamp(point.y, box.minY, box.maxY),
+                clamp(point.z, box.minZ, box.maxZ)
         );
     }
 
@@ -961,10 +879,7 @@ public class SpeedMine extends Module {
     ) {
         return Math.max(
                 min,
-                Math.min(
-                        max,
-                        value
-                )
+                Math.min(max, value)
         );
     }
 
@@ -985,10 +900,11 @@ public class SpeedMine extends Module {
         VoxelShape shape =
                 task.isInstantRemine()
                         ? Shapes.block()
-                        : task.getStartState().getShape(
-                                MC.level,
-                                pos
-                        );
+                        : task.getStartState()
+                                .getShape(
+                                        MC.level,
+                                        pos
+                                );
 
         if (shape.isEmpty()) {
             shape = Shapes.block();
@@ -996,15 +912,14 @@ public class SpeedMine extends Module {
 
         AABB bounds = shape.bounds();
 
-        AABB worldBox =
-                new AABB(
-                        pos.getX() + bounds.minX,
-                        pos.getY() + bounds.minY,
-                        pos.getZ() + bounds.minZ,
-                        pos.getX() + bounds.maxX,
-                        pos.getY() + bounds.maxY,
-                        pos.getZ() + bounds.maxZ
-                );
+        AABB worldBox = new AABB(
+                pos.getX() + bounds.minX,
+                pos.getY() + bounds.minY,
+                pos.getZ() + bounds.minZ,
+                pos.getX() + bounds.maxX,
+                pos.getY() + bounds.maxY,
+                pos.getZ() + bounds.maxZ
+        );
 
         Vec3 center = worldBox.getCenter();
 
@@ -1015,18 +930,17 @@ public class SpeedMine extends Module {
                                 - task.getPreviousProgress()
                 ) * event.getDelta();
 
-        float scale =
-                Math.max(
-                        0.0f,
-                        Math.min(
-                                1.0f,
-                                progress
-                                        / Math.max(
-                                                task.getTargetSpeed(),
-                                                0.0001f
-                                        )
-                        )
-                );
+        float scale = Math.max(
+                0.0f,
+                Math.min(
+                        1.0f,
+                        progress
+                                / Math.max(
+                                        task.getTargetSpeed(),
+                                        0.0001f
+                                )
+                )
+        );
 
         double dx =
                 (bounds.maxX - bounds.minX) * 0.5;
@@ -1047,15 +961,18 @@ public class SpeedMine extends Module {
                         dz * scale
                 );
 
-        int r = (int) (200.0f * (1.0f - scale));
-        int g = (int) (200.0f * scale);
+        int red =
+                (int) (200.0f * (1.0f - scale));
+
+        int green =
+                (int) (200.0f * scale);
 
         RenderUtil.drawBoxOutline(
                 event.getMatrix(),
                 renderBox,
                 new Color(
-                        r,
-                        g,
+                        red,
+                        green,
                         0,
                         255
                 ),
@@ -1089,6 +1006,7 @@ public class SpeedMine extends Module {
             this.blockPos = blockPos;
             this.facing = facing;
             this.targetSpeed = targetSpeed;
+
             this.startState =
                     MC.level.getBlockState(blockPos);
         }
@@ -1145,9 +1063,7 @@ public class SpeedMine extends Module {
             return previousProgress;
         }
 
-        public void setProgress(
-                float progress
-        ) {
+        public void setProgress(float progress) {
             previousProgress = this.progress;
             this.progress = progress;
         }
@@ -1157,9 +1073,7 @@ public class SpeedMine extends Module {
             progress = 0.0f;
         }
 
-        public float incrementProgress(
-                float amount
-        ) {
+        public float incrementProgress(float amount) {
             previousProgress = progress;
             progress += amount;
             return progress;
@@ -1185,9 +1099,7 @@ public class SpeedMine extends Module {
             return doublemineHoldTicks;
         }
 
-        public void setDoublemineHoldTicks(
-                int ticks
-        ) {
+        public void setDoublemineHoldTicks(int ticks) {
             doublemineHoldTicks = ticks;
         }
     }
