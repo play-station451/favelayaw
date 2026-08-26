@@ -1,468 +1,1068 @@
 package net.favela.yaw.impl.modules.categories.combat;
 
 import com.google.auto.service.AutoService;
+import net.favela.yaw.impl.event.Events;
+import net.favela.yaw.impl.event.Priority;
+import net.favela.yaw.impl.event.events.PacketEvent;
 import net.favela.yaw.impl.modules.Module;
 import net.favela.yaw.impl.setting.settings.BooleanSetting;
 import net.favela.yaw.impl.setting.settings.EnumSetting;
 import net.favela.yaw.impl.setting.settings.NumberSetting;
-import net.favela.yaw.impl.util.wrapper.Wrapper;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.enchantment.EnchantmentHelper;
-import net.minecraft.enchantment.Enchantments;
-import net.minecraft.entity.DamageUtil;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.entity.damage.DamageSource;
-import net.minecraft.entity.decoration.EndCrystalEntity;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.EndCrystalItem;
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
-import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
-import net.minecraft.network.packet.s2c.play.EntitiesDestroyS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket;
-import net.minecraft.network.packet.s2c.play.ExplosionS2CPacket;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.*;
-import net.minecraft.world.RaycastContext;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ClientboundExplodePacket;
+import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.EndCrystalItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.ClipContext;
 
-import java.awt.*;
-import java.util.*;
-import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.HashMap;
+import java.util.Map;
 
 import static net.favela.yaw.impl.util.wrapper.Wrapper.MC;
 
 @AutoService(Module.class)
 public class AutoCrystal extends Module {
 
-    public final EnumSetting<Swap> swapMode = enm("Swap", Swap.OFF);
-    public final EnumSetting<Placements> placements = enm("Placements", Placements.NATIVE);
-    public final NumberSetting placeRange = num("PlaceRange", 0.1f, 6f, 4.5f);
-    public final NumberSetting placeWallRange = num("PlaceWallRange", 0.1f, 6f, 4.5f);
-    public final NumberSetting breakRange = num("BreakRange", 0.1f, 6f, 4.5f);
-    public final NumberSetting breakWallRange = num("BreakWallRange", 0.1f, 6f, 4.5f);
-    public final NumberSetting minDamage = num("MinDamage", 0.1f, 10f, 4f);
-    public final NumberSetting maxSelfDamage = num("MaxSelfDamage", 0.1f, 20f, 10f);
-    public final BooleanSetting safety = bool("Safety", true);
-    public final BooleanSetting rotate = bool("Rotate", true);
-    public final BooleanSetting render = bool("Render", true);
-    public final NumberSetting fadeTime = num("FadeTime", 0, 1000, 250);
-    public final BooleanSetting breakThroughWalls = bool("BreakThroughWalls", true);
-    public final BooleanSetting placeThroughWalls = bool("PlaceThroughWalls", true);
-    public final BooleanSetting swing = bool("Swing", true);
+    public enum Swap {
+        NORMAL,
+        SILENT,
+        OFF
+    }
 
-    public enum Swap { NORMAL, SILENT, SILENT_ALT, OFF }
-    public enum Placements { NATIVE, PROTOCOL }
+    public enum Rotate {
+        NONE,
+        PACKET
+    }
 
-    private BlockPos renderPos;
-    private double renderDamage;
-    private EndCrystalEntity attackTarget;
+    public enum PlaceMode {
+        NATIVE,
+        PROTOCOL
+    }
+
+    public final EnumSetting<Swap> swap = enm(
+            "Swap",
+            "Crystal hotbar swap mode",
+            Swap.SILENT
+    );
+
+    public final EnumSetting<Rotate> rotate = enm(
+            "Rotate",
+            "Server-side rotation",
+            Rotate.PACKET
+    );
+
+    public final EnumSetting<PlaceMode> placeMode = enm(
+            "PlaceMode",
+            "Crystal placement mode",
+            PlaceMode.NATIVE
+    );
+
+    public final NumberSetting placeRange = num(
+            "PlaceRange",
+            "Maximum crystal placement distance",
+            0.1,
+            6.0,
+            4.5,
+            0.1
+    );
+
+    public final NumberSetting placeWallRange = num(
+            "PlaceWallRange",
+            "Maximum placement distance through walls",
+            0.1,
+            6.0,
+            4.5,
+            0.1
+    );
+
+    public final NumberSetting breakRange = num(
+            "BreakRange",
+            "Maximum crystal attack distance",
+            0.1,
+            6.0,
+            4.5,
+            0.1
+    );
+
+    public final NumberSetting breakWallRange = num(
+            "BreakWallRange",
+            "Maximum crystal attack distance through walls",
+            0.1,
+            6.0,
+            4.5,
+            0.1
+    );
+
+    public final NumberSetting minDamage = num(
+            "MinDamage",
+            "Minimum damage to an enemy",
+            0.1,
+            36.0,
+            4.0,
+            0.1
+    );
+
+    public final NumberSetting maxSelfDamage = num(
+            "MaxSelfDamage",
+            "Maximum allowed self damage",
+            0.1,
+            36.0,
+            10.0,
+            0.1
+    );
+
+    public final NumberSetting attackDelay = num(
+            "AttackDelay",
+            "Delay between crystal attacks",
+            0,
+            1000,
+            50,
+            1
+    );
+
+    public final NumberSetting placeDelay = num(
+            "PlaceDelay",
+            "Delay between crystal placements",
+            0,
+            1000,
+            50,
+            1
+    );
+
+    public final BooleanSetting safety = bool(
+            "Safety",
+            "Protect against excessive self damage",
+            true
+    );
+
+    public final BooleanSetting breakThroughWalls = bool(
+            "BreakThroughWalls",
+            "Allow attacking crystals through walls",
+            true
+    );
+
+    public final BooleanSetting placeThroughWalls = bool(
+            "PlaceThroughWalls",
+            "Allow placing through walls",
+            true
+    );
+
+    public final BooleanSetting swing = bool(
+            "Swing",
+            "Swing when attacking or placing",
+            true
+    );
+
+    public final BooleanSetting attack = bool(
+            "Attack",
+            "Attack existing crystals",
+            true
+    );
+
+    public final BooleanSetting place = bool(
+            "Place",
+            "Place crystals",
+            true
+    );
+
+    public final BooleanSetting targetPlayersOnly = bool(
+            "PlayersOnly",
+            "Only target players",
+            false
+    );
+
+    private Events.Handler<PacketEvent.Receive> packetHandler;
+
+    private EndCrystal attackTarget;
     private BlockPos placeTarget;
-    private Vec3d rotationTarget;
-    private long lastAttackTime, lastPlaceTime, lastSwapTime;
-    private final Map<Integer, Long> attackPackets = new ConcurrentHashMap<>();
-    private final Map<BlockPos, Long> placePackets = new ConcurrentHashMap<>();
-    private final Deque<Long> attackLatency = new EvictingQueue<>(20);
-    private final Map<BlockPos, Animation> fadeList = new HashMap<>();
-    private final PerSecondCounter crystalCounter = new PerSecondCounter();
-    private final Timer attackTimer = new Timer();
-    private final Timer placeTimer = new Timer();
+    private Vec3 rotationTarget;
+
+    private long lastAttack;
+    private long lastPlace;
+
+    private int silentPreviousSlot = -1;
+
+    private final Map<Integer, Long> attackedCrystals = new HashMap<>();
 
     public AutoCrystal() {
-        super("AutoCrystal", "Attacks entities with end crystals", Category.COMBAT);
+        super(
+                "AutoCrystal",
+                "Automatically places and attacks end crystals.",
+                Category.COMBAT
+        );
     }
 
     @Override
     public void onEnable() {
-        super.onEnable();
+        packetHandler = Events.on(
+                PacketEvent.Receive.class,
+                Priority.HIGH,
+                this::onPacketReceive
+        );
+
         reset();
     }
 
     @Override
     public void onDisable() {
-        super.onDisable();
+        restoreSilentSlot();
+
+        if (packetHandler != null) {
+            Events.off(packetHandler);
+            packetHandler = null;
+        }
+
         reset();
-        fadeList.clear();
-        attackPackets.clear();
-        placePackets.clear();
-        attackLatency.clear();
-        renderPos = null;
+        attackedCrystals.clear();
     }
 
     private void reset() {
         attackTarget = null;
         placeTarget = null;
         rotationTarget = null;
-        renderPos = null;
-        renderDamage = 0;
+        lastAttack = 0L;
+        lastPlace = 0L;
     }
 
     @Override
     public void onTick() {
-        if (MC.player == null || MC.level == null || MC.gameMode == null) return;
-        if (MC.player.isSpectator()) return;
-
-        attackTarget = findBestCrystalToBreak();
-        placeTarget = findBestBlockToPlace();
-
-        if (rotate.get() && rotationTarget != null) {
-            float[] rotations = getRotationsTo(MC.player.getEyePos(), rotationTarget);
-            MC.player.setYaw(rotations[0]);
-            MC.player.setPitch(rotations[1]);
+        if (MC.player == null
+                || MC.level == null
+                || MC.gameMode == null) {
+            return;
         }
 
-        if (attackTarget != null && attackTimer.passed(200)) {
+        if (MC.player.isSpectator()) {
+            return;
+        }
+
+        cleanupAttackCache();
+
+        attackTarget = null;
+        placeTarget = null;
+        rotationTarget = null;
+
+        if (attack.get()) {
+            attackTarget = findBestCrystalToBreak();
+        }
+
+        if (place.get()) {
+            placeTarget = findBestBlockToPlace();
+        }
+
+        if (rotationTarget != null && rotate.get() == Rotate.PACKET) {
+            rotateServer(rotationTarget);
+        }
+
+        long now = System.currentTimeMillis();
+
+        if (attackTarget != null
+                && now - lastAttack >= attackDelay.getLong()) {
             attackCrystal(attackTarget);
-            attackTimer.reset();
-            attackPackets.put(attackTarget.getId(), System.currentTimeMillis());
-            crystalCounter.updateCounter();
+            lastAttack = now;
         }
 
-        if (placeTarget != null && placeTimer.passed(200)) {
-            placeCrystal(placeTarget);
-            placeTimer.reset();
-            placePackets.put(placeTarget, System.currentTimeMillis());
-            renderPos = placeTarget;
-            renderDamage = getBestDamageAt(placeTarget);
-            fadeList.put(placeTarget, new Animation(true, fadeTime.get()));
+        if (placeTarget != null
+                && now - lastPlace >= placeDelay.getLong()) {
+            if (placeCrystal(placeTarget)) {
+                lastPlace = now;
+            }
         }
     }
 
-    private EndCrystalEntity findBestCrystalToBreak() {
-        EndCrystalEntity best = null;
-        double bestDamage = -1;
-        double range = breakRange.get();
-        double wallRange = breakWallRange.get();
+    private EndCrystal findBestCrystalToBreak() {
+        EndCrystal bestCrystal = null;
+        double bestDamage = minDamage.getDouble();
 
-        for (Entity e : MC.level.getEntities()) {
-            if (!(e instanceof EndCrystalEntity crystal) || !e.isAlive()) continue;
-            if (attackPackets.containsKey(crystal.getId())) continue;
+        double range = breakRange.getDouble();
+        double wallRange = breakWallRange.getDouble();
 
-            Vec3d pos = crystal.getPos();
-            double dist = MC.player.distanceTo(e);
-            if (dist > range && dist > wallRange) continue;
-            if (!breakThroughWalls.get() && !isVisible(pos)) continue;
-            if (dist > wallRange && !isVisible(pos)) continue;
+        for (Entity entity : MC.level.entitiesForRendering()) {
+            if (!(entity instanceof EndCrystal crystal)) {
+                continue;
+            }
 
-            double selfDmg = getExplosionDamage(MC.player, pos);
-            if (safety.get() && selfDmg > maxSelfDamage.get()) continue;
+            if (crystal.isRemoved()) {
+                continue;
+            }
 
-            for (Entity target : MC.level.getEntities()) {
-                if (!isValidTarget(target)) continue;
-                double dmg = getExplosionDamage(target, pos);
-                if (dmg > bestDamage && dmg >= minDamage.get()) {
-                    bestDamage = dmg;
-                    best = crystal;
-                    rotationTarget = pos;
-                }
+            int id = crystal.getId();
+
+            if (attackedCrystals.containsKey(id)) {
+                continue;
+            }
+
+            double distance = MC.player.distanceTo(crystal);
+
+            if (distance > range && distance > wallRange) {
+                continue;
+            }
+
+            Vec3 crystalPosition = crystal.position();
+
+            boolean visible = isVisible(crystalPosition);
+
+            if (!visible && !breakThroughWalls.get()) {
+                continue;
+            }
+
+            if (!visible && distance > wallRange) {
+                continue;
+            }
+
+            double selfDamage = getExplosionDamage(
+                    MC.player,
+                    crystalPosition
+            );
+
+            if (safety.get()
+                    && selfDamage > maxSelfDamage.getDouble()) {
+                continue;
+            }
+
+            double targetDamage = getBestTargetDamage(crystalPosition);
+
+            if (targetDamage > bestDamage) {
+                bestDamage = targetDamage;
+                bestCrystal = crystal;
+                rotationTarget = crystalPosition;
             }
         }
-        return best;
+
+        return bestCrystal;
     }
 
     private BlockPos findBestBlockToPlace() {
         BlockPos best = null;
-        double bestDamage = -1;
-        double range = placeRange.get();
-        double wallRange = placeWallRange.get();
+        double bestDamage = minDamage.getDouble();
+
+        double range = placeRange.getDouble();
+        double wallRange = placeWallRange.getDouble();
 
         for (BlockPos pos : getCrystalBlocks()) {
-            if (!canPlaceCrystalOn(pos)) continue;
-            Vec3d crystalPos = pos.toCenterPos().add(0, 1, 0);
-            double dist = MC.player.distanceTo(crystalPos);
-            if (dist > range && dist > wallRange) continue;
-            if (!placeThroughWalls.get() && !isVisible(crystalPos)) continue;
-            if (dist > wallRange && !isVisible(crystalPos)) continue;
+            if (!canPlaceCrystalOn(pos)) {
+                continue;
+            }
 
-            double selfDmg = getExplosionDamage(MC.player, crystalPos);
-            if (safety.get() && selfDmg > maxSelfDamage.get()) continue;
+            Vec3 crystalPosition = new Vec3(
+                    pos.getX() + 0.5,
+                    pos.getY() + 1.0,
+                    pos.getZ() + 0.5
+            );
 
-            for (Entity target : MC.level.getEntities()) {
-                if (!isValidTarget(target)) continue;
-                double dmg = getExplosionDamage(target, crystalPos);
-                if (dmg > bestDamage && dmg >= minDamage.get()) {
-                    bestDamage = dmg;
-                    best = pos;
-                    rotationTarget = crystalPos;
-                }
+            double distance = MC.player.position().distanceTo(
+                    crystalPosition
+            );
+
+            if (distance > range && distance > wallRange) {
+                continue;
+            }
+
+            boolean visible = isVisible(crystalPosition);
+
+            if (!visible && !placeThroughWalls.get()) {
+                continue;
+            }
+
+            if (!visible && distance > wallRange) {
+                continue;
+            }
+
+            double selfDamage = getExplosionDamage(
+                    MC.player,
+                    crystalPosition
+            );
+
+            if (safety.get()
+                    && selfDamage > maxSelfDamage.getDouble()) {
+                continue;
+            }
+
+            double targetDamage = getBestTargetDamage(crystalPosition);
+
+            if (targetDamage > bestDamage) {
+                bestDamage = targetDamage;
+                best = pos;
+                rotationTarget = crystalPosition;
             }
         }
+
         return best;
     }
 
-    private void attackCrystal(EndCrystalEntity crystal) {
-        Hand hand = getCrystalHand();
-        if (hand == null) hand = Hand.MAIN_HAND;
-        MC.gameMode.attack(MC.player, crystal);
-        if (swing.get()) MC.player.swingHand(hand);
-        else MC.player.networkHandler.sendPacket(new HandSwingC2SPacket(hand));
-    }
+    private double getBestTargetDamage(Vec3 explosionPosition) {
+        double best = 0.0;
 
-    private void placeCrystal(BlockPos pos) {
-        Hand hand = getCrystalHand();
-        if (hand == null) {
-            int slot = getCrystalSlot();
-            if (slot == -1) return;
-            if (swapMode.get() != Swap.OFF) {
-                if (swapMode.get() == Swap.SILENT_ALT) {
-                    MC.interactionManager.clickSlot(MC.player.playerScreenHandler.syncId,
-                            slot + 36, MC.player.getInventory().selectedSlot, SlotActionType.SWAP, MC.player);
-                } else if (swapMode.get() == Swap.SILENT) {
-                    MC.player.getInventory().selectedSlot = slot;
-                } else {
-                    MC.player.getInventory().selectedSlot = slot;
-                }
-                lastSwapTime = System.currentTimeMillis();
-            } else {
-                return;
+        for (Entity entity : MC.level.entitiesForRendering()) {
+            if (!(entity instanceof LivingEntity living)) {
+                continue;
+            }
+
+            if (!isValidTarget(living)) {
+                continue;
+            }
+
+            if (living.isDeadOrDying()) {
+                continue;
+            }
+
+            double damage = getExplosionDamage(
+                    living,
+                    explosionPosition
+            );
+
+            if (damage > best) {
+                best = damage;
             }
         }
-        Direction side = getPlaceDirection(pos);
-        BlockHitResult result = new BlockHitResult(pos.toCenterPos(), side, pos, false);
-        MC.player.networkHandler.sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, result));
-        if (swing.get()) MC.player.swingHand(Hand.MAIN_HAND);
-        else MC.player.networkHandler.sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+
+        return best;
     }
 
-    private Hand getCrystalHand() {
-        if (MC.player.getOffHandStack().getItem() instanceof EndCrystalItem) return Hand.OFF_HAND;
-        if (MC.player.getMainHandStack().getItem() instanceof EndCrystalItem) return Hand.MAIN_HAND;
+    private void attackCrystal(EndCrystal crystal) {
+        if (MC.player == null || MC.gameMode == null) {
+            return;
+        }
+
+        if (crystal.isRemoved()) {
+            return;
+        }
+
+        int id = crystal.getId();
+
+        attackedCrystals.put(
+                id,
+                System.currentTimeMillis()
+        );
+
+        MC.gameMode.attack(
+                MC.player,
+                crystal
+        );
+
+        if (swing.get()) {
+            MC.player.swing(
+                    InteractionHand.MAIN_HAND
+            );
+        }
+
+        restoreSilentSlot();
+    }
+
+    private boolean placeCrystal(BlockPos pos) {
+        InteractionHand hand = getCrystalHand();
+
+        int oldSlot = MC.player.getInventory().getSelectedSlot();
+
+        if (hand == null) {
+            int slot = getCrystalSlot();
+
+            if (slot == -1) {
+                return false;
+            }
+
+            if (swap.get() == Swap.OFF) {
+                return false;
+            }
+
+            if (swap.get() == Swap.SILENT) {
+                switchToSilent(slot);
+            } else {
+                MC.player.getInventory().setSelectedSlot(slot);
+                MC.player.connection.send(
+                        new ServerboundSetCarriedItemPacket(slot)
+                );
+            }
+
+            hand = InteractionHand.MAIN_HAND;
+        }
+
+        Direction side = getPlaceDirection(pos);
+
+        Vec3 hitPosition = new Vec3(
+                pos.getX() + 0.5,
+                pos.getY() + 1.0,
+                pos.getZ() + 0.5
+        );
+
+        BlockHitResult hitResult = new BlockHitResult(
+                hitPosition,
+                side,
+                pos,
+                false
+        );
+
+        var result = MC.gameMode.useItemOn(
+                MC.player,
+                hand,
+                hitResult
+        );
+
+        if (swing.get()) {
+            MC.player.swing(hand);
+        }
+
+        if (swap.get() != Swap.SILENT
+                && swap.get() != Swap.NORMAL
+                && oldSlot != MC.player.getInventory().getSelectedSlot()) {
+            MC.player.getInventory().setSelectedSlot(oldSlot);
+        }
+
+        if (swap.get() == Swap.SILENT) {
+            restoreSilentSlot();
+        }
+
+        return result.consumesAction();
+    }
+
+    private InteractionHand getCrystalHand() {
+        ItemStack offhand = MC.player.getItemInHand(
+                InteractionHand.OFF_HAND
+        );
+
+        if (!offhand.isEmpty()
+                && offhand.getItem() instanceof EndCrystalItem) {
+            return InteractionHand.OFF_HAND;
+        }
+
+        ItemStack mainhand = MC.player.getItemInHand(
+                InteractionHand.MAIN_HAND
+        );
+
+        if (!mainhand.isEmpty()
+                && mainhand.getItem() instanceof EndCrystalItem) {
+            return InteractionHand.MAIN_HAND;
+        }
+
         return null;
     }
 
     private int getCrystalSlot() {
-        for (int i = 0; i < 9; i++) {
-            if (MC.player.getInventory().getStack(i).getItem() instanceof EndCrystalItem) return i;
+        for (int slot = 0; slot < 9; slot++) {
+            ItemStack stack =
+                    MC.player.getInventory().getItem(slot);
+
+            if (!stack.isEmpty()
+                    && stack.getItem() instanceof EndCrystalItem) {
+                return slot;
+            }
         }
+
         return -1;
+    }
+
+    private void switchToSilent(int slot) {
+        if (MC.player == null) {
+            return;
+        }
+
+        int current =
+                MC.player.getInventory().getSelectedSlot();
+
+        if (current == slot) {
+            return;
+        }
+
+        if (silentPreviousSlot == -1) {
+            silentPreviousSlot = current;
+        }
+
+        MC.player.connection.send(
+                new ServerboundSetCarriedItemPacket(slot)
+        );
+    }
+
+    private void restoreSilentSlot() {
+        if (MC.player == null) {
+            silentPreviousSlot = -1;
+            return;
+        }
+
+        if (silentPreviousSlot == -1) {
+            return;
+        }
+
+        int slot = silentPreviousSlot;
+
+        MC.player.connection.send(
+                new ServerboundSetCarriedItemPacket(slot)
+        );
+
+        silentPreviousSlot = -1;
     }
 
     private boolean canPlaceCrystalOn(BlockPos pos) {
         BlockState state = MC.level.getBlockState(pos);
-        if (!state.isOf(Blocks.OBSIDIAN) && !state.isOf(Blocks.BEDROCK)) return false;
-        BlockPos up = pos.up();
-        if (placements.get() == Placements.PROTOCOL && !MC.level.isAir(up.up())) return false;
-        if (!MC.level.isAir(up) && !MC.level.getBlockState(up).isOf(Blocks.FIRE)) return false;
-        Box bb = new Box(up.getX(), up.getY(), up.getZ(), up.getX()+1, up.getY()+2, up.getZ()+1);
-        return MC.level.getEntities(null, bb).stream().noneMatch(e -> e instanceof EndCrystalEntity || !(e instanceof LivingEntity));
-    }
 
-    private List<BlockPos> getCrystalBlocks() {
-        List<BlockPos> list = new ArrayList<>();
-        double r = Math.ceil(placeRange.get());
-        Vec3d origin = MC.player.getPos();
-        for (int x = (int)-r; x <= r; x++) {
-            for (int y = (int)-r; y <= r; y++) {
-                for (int z = (int)-r; z <= r; z++) {
-                    list.add(new BlockPos((int)origin.x + x, (int)origin.y + y, (int)origin.z + z));
-                }
+        if (!state.is(Blocks.OBSIDIAN)
+                && !state.is(Blocks.BEDROCK)) {
+            return false;
+        }
+
+        BlockPos first = pos.above();
+        BlockPos second = pos.above(2);
+
+        BlockState firstState =
+                MC.level.getBlockState(first);
+
+        BlockState secondState =
+                MC.level.getBlockState(second);
+
+        if (placeMode.get() == PlaceMode.PROTOCOL) {
+            if (!firstState.isAir()
+                    && !firstState.is(Blocks.FIRE)) {
+                return false;
+            }
+
+            if (!secondState.isAir()) {
+                return false;
+            }
+        } else {
+            if (!firstState.isAir()
+                    && !firstState.is(Blocks.FIRE)) {
+                return false;
+            }
+
+            if (!secondState.isAir()) {
+                return false;
             }
         }
-        return list;
+
+        AABB crystalBox = new AABB(
+                pos.getX(),
+                pos.getY() + 1.0,
+                pos.getZ(),
+                pos.getX() + 1.0,
+                pos.getY() + 3.0,
+                pos.getZ() + 1.0
+        );
+
+        for (Entity entity : MC.level.entitiesForRendering()) {
+            if (entity.isRemoved()) {
+                continue;
+            }
+
+            if (entity.getBoundingBox().intersects(crystalBox)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private Direction getPlaceDirection(BlockPos pos) {
-        return Direction.UP;
-    }
+        Vec3 eye = MC.player.getEyePosition();
 
-    private boolean isVisible(Vec3d target) {
-        BlockHitResult result = MC.level.raycast(new RaycastContext(
-                MC.player.getEyePos(), target,
-                RaycastContext.ShapeType.COLLIDER,
-                RaycastContext.FluidHandling.NONE, MC.player));
-        return result.getType() == HitResult.Type.MISS || result.getPos().squaredDistanceTo(target) < 0.1;
-    }
+        Direction best = Direction.UP;
+        double bestDistance = Double.MAX_VALUE;
 
-    private boolean isValidTarget(Entity e) {
-        return e instanceof PlayerEntity || e instanceof LivingEntity;
-    }
+        for (Direction direction : Direction.values()) {
+            BlockPos adjacent = pos.relative(direction);
 
-    private double getBestDamageAt(BlockPos pos) {
-        Vec3d crystalPos = pos.toCenterPos().add(0, 1, 0);
-        double best = 0;
-        for (Entity e : MC.level.getEntities()) {
-            if (isValidTarget(e)) {
-                double dmg = getExplosionDamage(e, crystalPos);
-                if (dmg > best) best = dmg;
+            if (!MC.level.getBlockState(adjacent).isSolid()) {
+                continue;
+            }
+
+            Vec3 hit = Vec3.atCenterOf(adjacent)
+                    .add(
+                            direction.getStepX() * 0.5,
+                            direction.getStepY() * 0.5,
+                            direction.getStepZ() * 0.5
+                    );
+
+            double distance = eye.distanceToSqr(hit);
+
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = direction;
             }
         }
+
         return best;
     }
 
-    private double getExplosionDamage(Entity entity, Vec3d explosionPos) {
-        return getExplosionDamage(entity, explosionPos, false, false);
-    }
+    private Iterable<BlockPos> getCrystalBlocks() {
+        int radius =
+                (int) Math.ceil(
+                        Math.max(
+                                placeRange.getDouble(),
+                                placeWallRange.getDouble()
+                        )
+                );
 
-    private double getExplosionDamage(Entity entity, Vec3d explosionPos, boolean ignoreTerrain, boolean assumeBestArmor) {
-        double exposure = getExposure(explosionPos, entity.getBoundingBox(), ignoreTerrain);
-        double distance = entity.getPos().distanceTo(explosionPos);
-        double power = 12.0f;
-        double w = distance / power;
-        double ac = (1.0 - w) * exposure;
-        double rawDamage = (float) ((int) ((ac * ac + ac) / 2.0 * 7.0 * 12.0 + 1.0));
-        return applyArmorReduction(entity, rawDamage, assumeBestArmor);
-    }
+        BlockPos origin =
+                MC.player.blockPosition();
 
-    private float getExposure(Vec3d source, Box box, boolean ignoreTerrain) {
-        double xStep = 1.0 / (box.maxX - box.minX + 1);
-        double yStep = 1.0 / (box.maxY - box.minY + 1);
-        double zStep = 1.0 / (box.maxZ - box.minZ + 1);
-        int hits = 0, misses = 0;
-        for (double x = box.minX; x <= box.maxX; x += xStep) {
-            for (double y = box.minY; y <= box.maxY; y += yStep) {
-                for (double z = box.minZ; z <= box.maxZ; z += zStep) {
-                    Vec3d pos = new Vec3d(x, y, z);
-                    if (raycast(pos, source, ignoreTerrain)) misses++;
-                    hits++;
+        java.util.ArrayList<BlockPos> positions =
+                new java.util.ArrayList<>();
+
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -radius; y <= radius; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    BlockPos pos =
+                            origin.offset(x, y, z);
+
+                    double dx =
+                            pos.getX() + 0.5 - MC.player.getX();
+                    double dy =
+                            pos.getY() + 1.0 - MC.player.getY();
+                    double dz =
+                            pos.getZ() + 0.5 - MC.player.getZ();
+
+                    double distance =
+                            Math.sqrt(
+                                    dx * dx
+                                            + dy * dy
+                                            + dz * dz
+                            );
+
+                    if (distance <=
+                            Math.max(
+                                    placeRange.getDouble(),
+                                    placeWallRange.getDouble()
+                            )) {
+                        positions.add(pos);
+                    }
                 }
             }
         }
-        return (float) misses / hits;
+
+        return positions;
     }
 
-    private boolean raycast(Vec3d start, Vec3d end, boolean ignoreTerrain) {
-        BlockHitResult result = MC.level.raycast(new RaycastContext(
-                start, end, RaycastContext.ShapeType.COLLIDER,
-                RaycastContext.FluidHandling.NONE, MC.player));
-        if (ignoreTerrain) return false;
-        return result.getType() != HitResult.Type.MISS;
-    }
-
-    private double applyArmorReduction(Entity entity, double damage, boolean assumeBestArmor) {
-        if (!(entity instanceof LivingEntity living)) return damage;
-        float armor = (float) living.getAttributeValue(EntityAttributes.GENERIC_ARMOR);
-        float toughness = (float) living.getAttributeValue(EntityAttributes.GENERIC_ARMOR_TOUGHNESS);
-        damage = DamageUtil.getDamageLeft(living, (float) damage, MC.world.getDamageSources().explosion(null), armor, toughness);
-        if (living.hasStatusEffect(StatusEffects.RESISTANCE)) {
-            int amp = living.getStatusEffect(StatusEffects.RESISTANCE).getAmplifier() + 1;
-            damage *= (1.0 - amp * 0.2);
+    private boolean isValidTarget(LivingEntity entity) {
+        if (entity == MC.player) {
+            return false;
         }
-        float prot = 0;
-        for (ItemStack stack : living.getArmorItems()) {
-            if (assumeBestArmor) {
-                prot += 4;
-            } else {
-                prot += EnchantmentHelper.getLevel(Enchantments.PROTECTION, stack);
-                prot += EnchantmentHelper.getLevel(Enchantments.BLAST_PROTECTION, stack) * 2;
-            }
+
+        if (entity.isDeadOrDying()) {
+            return false;
         }
-        damage = DamageUtil.getInflictedDamage((float) damage, prot);
-        return Math.max(0, damage);
-    }
 
-    private float[] getRotationsTo(Vec3d from, Vec3d to) {
-        Vec3d diff = to.subtract(from);
-        double yaw = Math.toDegrees(Math.atan2(diff.z, diff.x)) - 90;
-        double pitch = -Math.toDegrees(Math.atan2(diff.y, Math.sqrt(diff.x*diff.x + diff.z*diff.z)));
-        return new float[] { MathHelper.wrapDegrees((float)yaw), MathHelper.wrapDegrees((float)pitch) };
-    }
-
-    public void onRenderWorld(net.minecraft.client.util.math.MatrixStack matrices) {
-        if (!render.get() || renderPos == null) return;
-        renderBox(matrices, renderPos, new Color(255, 0, 0, 80).getRGB());
-        renderBoundingBox(matrices, renderPos, 1.5f, 0xFFFF0000);
-        if (renderDamage > 0) {
-            Vec3d pos = renderPos.toCenterPos().add(0, 0.5, 0);
+        if (!entity.isAttackable()) {
+            return false;
         }
-        for (Map.Entry<BlockPos, Animation> entry : fadeList.entrySet()) {
-            if (entry.getKey().equals(renderPos)) continue;
-            Animation anim = entry.getValue();
-            anim.setState(false);
-            float factor = (float) anim.getFactor();
-            if (factor > 0.01f) {
-                int alpha = (int) (80 * factor);
-                int boxColor = new Color(255, 0, 0, alpha).getRGB();
-                int lineColor = new Color(255, 255, 255, (int)(255*factor)).getRGB();
-                renderBox(matrices, entry.getKey(), boxColor);
-                renderBoundingBox(matrices, entry.getKey(), 1.0f, lineColor);
-            }
+
+        if (targetPlayersOnly.get()
+                && !(entity instanceof Player)) {
+            return false;
         }
-        fadeList.entrySet().removeIf(e -> e.getValue().getFactor() <= 0.01);
+
+        return true;
     }
 
-    private void renderBox(MatrixStack matrices, BlockPos pos, int color) {
-        double x = pos.getX(), y = pos.getY(), z = pos.getZ();
-        float r = ((color>>16)&0xFF)/255f, g = ((color>>8)&0xFF)/255f, b = (color&0xFF)/255f, a = ((color>>24)&0xFF)/255f;
-        renderBoundingBox(matrices, pos, 1.0f, color);
-    }
-
-    private void renderBoundingBox(MatrixStack matrices, BlockPos pos, float width, int color) {
-    }
-
-    public void onPacketInbound(Object packet) {
-        if (packet instanceof EntitySpawnS2CPacket spawn) {
+    private boolean isVisible(Vec3 target) {
+        if (MC.player == null || MC.level == null) {
+            return false;
         }
-        if (packet instanceof ExplosionS2CPacket exp) {
-            for (Entity e : MC.level.getEntities()) {
-                if (e instanceof EndCrystalEntity && e.squaredDistanceTo(exp.getX(), exp.getY(), exp.getZ()) < 144) {
-                    MC.level.removeEntity(e.getId(), Entity.RemovalReason.DISCARDED);
-                    attackPackets.remove(e.getId());
+
+        HitResult result = MC.level.clip(
+                new ClipContext(
+                        MC.player.getEyePosition(),
+                        target,
+                        ClipContext.Block.COLLIDER,
+                        ClipContext.Fluid.NONE,
+                        MC.player
+                )
+        );
+
+        return result.getType() == HitResult.Type.MISS;
+    }
+
+    private double getExplosionDamage(
+            Entity entity,
+            Vec3 explosionPosition
+    ) {
+        if (!(entity instanceof LivingEntity living)) {
+            return 0.0;
+        }
+
+        double distance =
+                living.position().distanceTo(
+                        explosionPosition
+                );
+
+        double exposure =
+                getExposure(
+                        explosionPosition,
+                        living.getBoundingBox()
+                );
+
+        double scaledDistance =
+                distance / 12.0;
+
+        if (scaledDistance >= 1.0) {
+            return 0.0;
+        }
+
+        double impact =
+                (1.0 - scaledDistance)
+                        * exposure;
+
+        double damage =
+                ((impact * impact + impact)
+                        / 2.0)
+                        * 7.0
+                        * 12.0
+                        + 1.0;
+
+        return applyProtection(
+                living,
+                (float) damage
+        );
+    }
+
+    private double getExposure(
+            Vec3 source,
+            AABB box
+    ) {
+        double xStep =
+                1.0 /
+                        (box.maxX - box.minX + 1.0);
+
+        double yStep =
+                1.0 /
+                        (box.maxY - box.minY + 1.0);
+
+        double zStep =
+                1.0 /
+                        (box.maxZ - box.minZ + 1.0);
+
+        int hits = 0;
+        int total = 0;
+
+        for (double x = box.minX;
+             x <= box.maxX;
+             x += xStep) {
+
+            for (double y = box.minY;
+                 y <= box.maxY;
+                 y += yStep) {
+
+                for (double z = box.minZ;
+                     z <= box.maxZ;
+                     z += zStep) {
+
+                    Vec3 point =
+                            new Vec3(x, y, z);
+
+                    if (canSeeExplosionPoint(
+                            point,
+                            source
+                    )) {
+                        hits++;
+                    }
+
+                    total++;
                 }
             }
         }
-        if (packet instanceof EntitiesDestroyS2CPacket destroy) {
-            for (int id : destroy.getEntityIds()) attackPackets.remove(id);
+
+        if (total == 0) {
+            return 0.0;
+        }
+
+        return (double) hits / total;
+    }
+
+    private boolean canSeeExplosionPoint(
+            Vec3 start,
+            Vec3 end
+    ) {
+        HitResult result = MC.level.clip(
+                new ClipContext(
+                        start,
+                        end,
+                        ClipContext.Block.COLLIDER,
+                        ClipContext.Fluid.NONE,
+                        MC.player
+                )
+        );
+
+        return result.getType() == HitResult.Type.MISS;
+    }
+
+    private double applyProtection(
+            LivingEntity entity,
+            float damage
+    ) {
+        float armor =
+                entity.getArmorValue();
+
+        float toughness =
+                (float) entity
+                        .getAttributeValue(
+                                net.minecraft.world.entity.ai.attributes.Attributes.ARMOR_TOUGHNESS
+                        );
+
+        net.minecraft.world.damagesource.DamageSource source =
+                MC.level.damageSources()
+                        .explosion(
+                                null,
+                                null
+                        );
+
+        float reduced =
+                net.minecraft.world.damagesource.CombatRules
+                        .getDamageAfterAbsorb(
+                                entity,
+                                damage,
+                                source,
+                                armor,
+                                toughness
+                        );
+
+        if (entity.hasEffect(
+                net.minecraft.world.effect.MobEffects.RESISTANCE
+        )) {
+            net.minecraft.world.effect.MobEffectInstance effect =
+                    entity.getEffect(
+                            net.minecraft.world.effect.MobEffects.RESISTANCE
+                    );
+
+            if (effect != null) {
+                int amplifier =
+                        effect.getAmplifier() + 1;
+
+                reduced *=
+                        Math.max(
+                                0.0f,
+                                1.0f
+                                        - amplifier * 0.2f
+                        );
+            }
+        }
+
+        return Math.max(
+                0.0,
+                reduced
+        );
+    }
+
+    private void rotateServer(Vec3 target) {
+        if (MC.player == null) {
+            return;
+        }
+
+        Vec3 eye =
+                MC.player.getEyePosition();
+
+        double dx =
+                target.x - eye.x;
+
+        double dy =
+                target.y - eye.y;
+
+        double dz =
+                target.z - eye.z;
+
+        double horizontal =
+                Math.sqrt(
+                        dx * dx
+                                + dz * dz
+                );
+
+        float yaw =
+                (float) Math.toDegrees(
+                        Math.atan2(dz, dx)
+                ) - 90.0f;
+
+        float pitch =
+                (float) -Math.toDegrees(
+                        Math.atan2(
+                                dy,
+                                horizontal
+                        )
+                );
+
+        yaw = wrapDegrees(yaw);
+        pitch = Math.max(-90.0f, Math.min(90.0f, pitch));
+
+        MC.player.connection.send(
+                new ServerboundMovePlayerPacket.Rot(
+                        yaw,
+                        pitch,
+                        MC.player.onGround(),
+                        MC.player.horizontalCollision
+                )
+        );
+    }
+
+    private float wrapDegrees(float value) {
+        value %= 360.0f;
+
+        if (value >= 180.0f) {
+            value -= 360.0f;
+        }
+
+        if (value < -180.0f) {
+            value += 360.0f;
+        }
+
+        return value;
+    }
+
+    private void onPacketReceive(PacketEvent.Receive event) {
+        if (MC.player == null
+                || MC.level == null) {
+            return;
+        }
+
+        if (event.packet()
+                instanceof ClientboundRemoveEntitiesPacket packet) {
+
+            for (int id : packet.getEntityIds()) {
+                attackedCrystals.remove(id);
+            }
+
+            return;
+        }
+
+        if (event.packet()
+                instanceof ClientboundExplodePacket packet) {
+
+            Vec3 center = packet.center();
+            double radius = packet.radius();
+
+            attackedCrystals.entrySet().removeIf(
+                    entry -> {
+                        Entity entity =
+                                MC.level.getEntity(
+                                        entry.getKey()
+                                );
+
+                        if (!(entity instanceof EndCrystal crystal)) {
+                            return true;
+                        }
+
+                        return crystal.position()
+                                .distanceToSqr(center)
+                                <= radius * radius * 4.0;
+                    }
+            );
         }
     }
 
-    public void onPacketOutbound(Object packet) {
-        if (packet instanceof UpdateSelectedSlotC2SPacket) {
-            lastSwapTime = System.currentTimeMillis();
-        }
-    }
+    private void cleanupAttackCache() {
+        long now =
+                System.currentTimeMillis();
 
-    private static class EvictingQueue<E> extends ConcurrentLinkedDeque<E> {
-        private final int limit;
-        public EvictingQueue(int limit) { this.limit = limit; }
-        @Override public boolean add(E e) { boolean b = super.add(e); while (size() > limit) remove(); return b; }
-    }
-
-    private static class PerSecondCounter {
-        private final Deque<Long> times = new ConcurrentLinkedDeque<>();
-        public void updateCounter() { times.add(System.currentTimeMillis() + 1000); }
-        public int getPerSecond() {
-            long now = System.currentTimeMillis();
-            times.removeIf(t -> t < now);
-            return times.size();
-        }
-    }
-
-    private static class Timer {
-        private long last = System.currentTimeMillis();
-        public boolean passed(long ms) { return System.currentTimeMillis() - last >= ms; }
-        public void reset() { last = System.currentTimeMillis(); }
-    }
-
-    private static class Animation {
-        private final float length;
-        private long start;
-        private boolean state;
-        public Animation(boolean initial, float length) {
-            this.length = length;
-            this.state = initial;
-            this.start = System.currentTimeMillis();
-        }
-        public void setState(boolean state) { this.state = state; this.start = System.currentTimeMillis(); }
-        public double getFactor() {
-            double elapsed = (System.currentTimeMillis() - start) / length;
-            double f = state ? Math.min(elapsed, 1) : Math.max(1 - elapsed, 0);
-            return Math.min(f, 1);
-        }
-        public boolean isFinished() { return getFactor() <= 0.01 || getFactor() >= 0.99; }
-    }
-
-    @Override
-    public String getModuleData() {
-        return String.format("%d/s", crystalCounter.getPerSecond());
+        attackedCrystals.entrySet().removeIf(
+                entry -> now - entry.getValue() > 1000L
+        );
     }
 }
