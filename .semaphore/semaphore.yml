@@ -1,6 +1,5 @@
 version: v1.0
 name: Build Java
-
 agent:
   machine:
     type: f1-standard-2
@@ -17,97 +16,49 @@ blocks:
             - java -version
             - chmod +x ./gradlew
 
-            - |
-              echo "=== Gradle Properties ==="
-              ./gradlew properties
+            - ./gradlew properties
 
-            - |
-              echo "=== Minecraft / Fabric Versions ==="
-              ./gradlew properties | grep -Ei \
-                "minecraft_version|loader_version|fabric_version|java"
+            - echo "=== Minecraft / Fabric Versions ==="
+            - './gradlew properties | grep -Ei "minecraft_version|loader_version|fabric_version|java"'
 
-            - |
-              echo "=== Compile Classpath ==="
-              ./gradlew dependencies --configuration compileClasspath \
-                | grep -Ei "minecraft|fabric-loader|fabric-api" \
-                | head -n 100
+            - echo "=== Compile Classpath ==="
+            - './gradlew dependencies --configuration compileClasspath | grep -Ei "minecraft|fabric-loader|fabric-api" | head -n 100'
 
-            - |
-              echo "=== Gradle Build Environment ==="
-              ./gradlew buildEnvironment
+            - echo "=== Gradle Build Environment ==="
+            - ./gradlew buildEnvironment
 
-            - |
-              echo "=== Loom / Minecraft Cache ==="
-              find ~/.gradle/caches \
-                -type f \
-                \( -iname "*minecraft*.jar" -o -iname "*mappings*.jar" \) \
-                2>/dev/null \
-                | grep -vE "(sources|javadoc)" \
-                | head -n 100
+            - echo "=== Minecraft / Mappings JARs ==="
+            - 'find ~/.gradle/caches -type f \( -iname "*minecraft*.jar" -o -iname "*mappings*.jar" \) 2>/dev/null | grep -vE "(sources|javadoc)" | head -n 100'
 
-            - |
-              echo "=== Fabric Loader Cache ==="
-              find ~/.gradle/caches \
-                -type f \
-                -iname "*fabric-loader*.jar" \
-                2>/dev/null \
-                | head -n 50
+            - echo "=== Minecraft JAR ==="
+            - 'MC_JAR=$(find ~/.gradle/caches -type f -iname "*minecraft*.jar" 2>/dev/null | grep -vE "(sources|javadoc)" | head -n 1)'
+            - echo "Minecraft jar found at $MC_JAR"
 
-            - |
-              echo "=== Minecraft Classes ==="
-              MC_JAR=$(find ~/.gradle/caches \
-                -type f \
-                -iname "*minecraft*.jar" \
-                2>/dev/null \
-                | grep -vE "(sources|javadoc)" \
-                | head -n 1)
+            - echo "=== Crystal Classes ==="
+            - 'jar tf "$MC_JAR" 2>/dev/null | grep -Ei "crystal|endcrystal" | head -n 100 || true'
 
-              echo "MC_JAR=$MC_JAR"
+            - echo "=== Entity Classes ==="
+            - 'jar tf "$MC_JAR" 2>/dev/null | grep -Ei "/entity/" | head -n 100 || true'
 
-              if [ -n "$MC_JAR" ]; then
-                echo "--- Crystal classes ---"
-                jar tf "$MC_JAR" \
-                  | grep -Ei "crystal|endcrystal" \
-                  | head -n 100
+            - echo "=== Block Classes ==="
+            - 'jar tf "$MC_JAR" 2>/dev/null | grep -Ei "/block/" | head -n 100 || true'
 
-                echo "--- Entity classes ---"
-                jar tf "$MC_JAR" \
-                  | grep -Ei "/entity/" \
-                  | head -n 100
+            - echo "=== Interaction Classes ==="
+            - 'jar tf "$MC_JAR" 2>/dev/null | grep -Ei "interaction|interact|gamemode|game_mode" | head -n 100 || true'
 
-                echo "--- Block classes ---"
-                jar tf "$MC_JAR" \
-                  | grep -Ei "/block/" \
-                  | head -n 100
+            - echo "=== Fabric Loader ==="
+            - 'find ~/.gradle/caches -type f -iname "*fabric-loader*.jar" 2>/dev/null | head -n 50'
 
-                echo "--- Interaction classes ---"
-                jar tf "$MC_JAR" \
-                  | grep -Ei "interaction|interact|gamemode|game_mode" \
-                  | head -n 100
-              else
-                echo "WARNING: Could not locate Minecraft jar"
-              fi
+            - echo "=== Loom Tasks ==="
+            - './gradlew tasks --all | grep -Ei "loom|minecraft|mapping" | head -n 100'
 
-            - |
-              echo "=== Fabric Loom Tasks ==="
-              ./gradlew tasks --all \
-                | grep -Ei "loom|minecraft|mapping" \
-                | head -n 100
+            - echo "=== Gradle Version ==="
+            - ./gradlew --version
 
-            - |
-              echo "=== Java Compiler ==="
-              javac -version
+            - javac -version
 
-            - |
-              echo "=== Gradle Version ==="
-              ./gradlew --version
+            - ./gradlew clean build --stacktrace
 
-            - |
-              echo "=== Attempting Build ==="
-              ./gradlew clean build --stacktrace
-
-            - |
-              echo "=== Built Artifacts ==="
-              find build/libs -maxdepth 1 -type f -print
+            - 'find build/libs -maxdepth 1 -type f -print'
 
             - 'artifact push workflow build/libs'
