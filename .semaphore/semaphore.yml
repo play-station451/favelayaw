@@ -20,63 +20,53 @@ blocks:
 
             - chmod +x ./gradlew
 
-            - echo "=== Gradle Properties ==="
-            - ./gradlew properties
-
-            - echo "=== Minecraft / Fabric Versions ==="
-            - './gradlew properties | grep -Ei "minecraft_version|loader_version|fabric_api_version|loom_version|java" || true'
+            - echo "=== Gradle / Minecraft Properties ==="
+            - ./gradlew properties | grep -Ei "minecraft_version|loader_version|fabric_api_version|loom_version|java" || true
 
             - echo "=== Gradle Version ==="
             - ./gradlew --version
 
-            - echo "=== Minecraft Cache ==="
-            - 'find ~/.gradle/caches -type f -path "*/com.mojang/minecraft/*/*.jar" 2>/dev/null | grep -vE "(sources|javadoc)" | sort'
+            - echo "=== Build ==="
+            - ./gradlew clean build --stacktrace
 
-            - echo "=== Minecraft JAR ==="
-            - 'MC_JAR=$(find ~/.gradle/caches -type f -path "*/com.mojang/minecraft/*/*.jar" 2>/dev/null | grep -vE "(sources|javadoc)" | sort | head -n 1)'
-            - 'test -n "$MC_JAR"'
-            - 'echo "Minecraft jar: $MC_JAR"'
+            - echo "=== Loom Minecraft Cache ==="
+            - find ~/.gradle/caches/fabric-loom -type f \
+                \( -name "minecraft-common.jar" -o -name "minecraft-client.jar" -o -name "minecraft-server.jar" \) \
+                2>/dev/null | sort
 
-            - echo "=== Mapping / Loom Cache ==="
-            - 'find ~/.gradle/caches -type f \( -iname "*mapping*.jar" -o -iname "*mappings*.jar" \) 2>/dev/null | grep -vE "(sources|javadoc)" | sort | head -n 100'
+            - echo "=== Locate Minecraft 26.2 JAR ==="
+            - 'MC_JAR=$(find ~/.gradle/caches/fabric-loom -type f -name "minecraft-common.jar" 2>/dev/null | sort | tail -n 1)'
+            - 'if [ -z "$MC_JAR" ]; then echo "minecraft-common.jar not found"; exit 1; fi'
+            - 'echo "Minecraft common jar: $MC_JAR"'
 
-            - echo "=== Crystal Classes ==="
-            - 'jar tf "$MC_JAR" | grep -Ei "EndCrystal|Crystal|end_crystal" | head -n 100 || true'
-
-            - echo "=== Interaction / Inventory Classes ==="
-            - 'jar tf "$MC_JAR" | grep -Ei "Interact|Interaction|Inventory|Slot|SelectedSlot|GameMode|Gameplay" | head -n 200 || true'
-
-            - echo "=== Entity Classes ==="
-            - 'jar tf "$MC_JAR" | grep -Ei "Entity|LivingEntity|Player" | head -n 200 || true'
-
-            - echo "=== Relevant Minecraft Packages ==="
-            - 'jar tf "$MC_JAR" | grep -Ei "network/.*packet|client/multiplayer|world/level|world/item|world/entity" | head -n 300 || true'
+            - echo "=== Minecraft JAR Contents ==="
+            - 'jar tf "$MC_JAR" | grep -Ei "MultiPlayerGameMode|EndCrystal|Crystal|Inventory|Interaction|Explosion" | head -n 300 || true'
 
             - echo "=== MultiPlayerGameMode ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.client.multiplayer.MultiPlayerGameMode 2>&1 | grep -Ei -A 8 -B 3 "attack|use|interact|destroy|startPrediction|continueDestroy" || true'
+            - 'javap -classpath "$MC_JAR" -p net.minecraft.client.multiplayer.MultiPlayerGameMode 2>&1 || true'
 
-            - echo "=== ClientPacketListener ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.client.multiplayer.ClientPacketListener 2>&1 | grep -Ei -A 5 -B 3 "send|packet|connection" | head -n 150 || true'
+            - echo "=== MultiPlayerGameMode Crystal/Interaction Methods ==="
+            - 'javap -classpath "$MC_JAR" -p net.minecraft.client.multiplayer.MultiPlayerGameMode 2>&1 | grep -Ei -A 8 -B 3 "attack|useItem|useItemOn|interact|destroy|startDestroy|continueDestroy|prediction" || true'
 
-            - echo "=== Serverbound Packets ==="
+            - echo "=== Client Packet Classes ==="
+            - 'jar tf "$MC_JAR" | grep -Ei "net/minecraft/network/protocol/game/(Serverbound|Clientbound)" | grep -Ei "Interact|Swing|Move|Slot|Entity|Explosion" | sort | head -n 300 || true'
+
+            - echo "=== Serverbound Interaction Packets ==="
             - 'jar tf "$MC_JAR" | grep -Ei "Serverbound.*(Interact|Swing|Use|Move|Slot)" | sort || true'
 
-            - echo "=== Clientbound Crystal / Entity Packets ==="
-            - 'jar tf "$MC_JAR" | grep -Ei "Clientbound.*(AddEntity|RemoveEntities|LevelEvent|Explosion|Entity)" | sort | head -n 200 || true'
+            - echo "=== Entity / Crystal Classes ==="
+            - 'jar tf "$MC_JAR" | grep -Ei "EndCrystal|EnderCrystal|Crystal" | sort || true'
 
-            - echo "=== Damage / Explosion Classes ==="
-            - 'jar tf "$MC_JAR" | grep -Ei "Explosion|Damage|CombatRules|Difficulty" | sort | head -n 200 || true'
+            - echo "=== Explosion / Damage Classes ==="
+            - 'jar tf "$MC_JAR" | grep -Ei "Explosion|CombatRules|DamageSource|DamageSources" | sort | head -n 200 || true'
 
-            - echo "=== Fabric / Loader Dependencies ==="
-            - './gradlew dependencies --configuration compileClasspath | grep -Ei "minecraft|fabric-loader|fabric-api" | head -n 200 || true'
+            - echo "=== Relevant World / Entity Classes ==="
+            - 'jar tf "$MC_JAR" | grep -Ei "world/level|world/entity|world/item" | grep -Ei "Player|LivingEntity|Entity|Block|ItemStack|Interaction" | head -n 300 || true'
 
-            - echo "=== Loom Tasks ==="
-            - './gradlew tasks --all | grep -Ei "loom|mapping|minecraft" | head -n 200 || true'
+            - echo "=== Fabric Loom Cache Tree ==="
+            - 'find ~/.gradle/caches/fabric-loom/26.2 -maxdepth 3 -type f 2>/dev/null | sort | head -n 300 || true'
 
-            - echo "=== Final Build ==="
-            - './gradlew build --stacktrace'
-
-            - echo "=== Output ==="
-            - 'find build/libs -maxdepth 1 -type f -printf "%p\n"'
+            - echo "=== Build Artifacts ==="
+            - find build/libs -maxdepth 1 -type f -print
 
             - 'artifact push workflow build/libs'
