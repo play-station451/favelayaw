@@ -21,57 +21,13 @@ blocks:
             - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
             - echo "Minecraft jar found at $MC_JAR"
 
-            - echo "=== EndCrystal ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.entity.boss.enderdragon.EndCrystal 2>&1 || true'
+            - echo "=== 26.2 Carried Slot Packet ==="
+            - 'javap -classpath "$MC_JAR" -p net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket 2>&1 || true'
 
-            - echo "=== EndCrystalItem ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.item.EndCrystalItem 2>&1 || true'
+            - echo "=== 26.2 Explosion Packet ==="
+            - 'javap -classpath "$MC_JAR" -p net.minecraft.network.protocol.game.ClientboundExplodePacket 2>&1 || true'
 
-            - echo "=== ServerboundInteractPacket ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.network.protocol.game.ServerboundInteractPacket 2>&1 || true'
-
-            - echo "=== ServerboundUseItemOnPacket ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.network.protocol.game.ServerboundUseItemOnPacket 2>&1 || true'
-
-            - echo "=== ServerboundUseItemPacket ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.network.protocol.game.ServerboundUseItemPacket 2>&1 || true'
-
-            - echo "=== ServerboundSwingPacket ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.network.protocol.game.ServerboundSwingPacket 2>&1 || true'
-
-            - echo "=== Entity ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.entity.Entity 2>&1 | grep -Ei -A 5 -B 3 "getId|getX|getY|getZ|distance|bounding|position" || true'
-
-            - echo "=== LivingEntity ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.entity.LivingEntity 2>&1 | grep -Ei -A 5 -B 3 "health|armor|effect|damage|equipment|bounding" || true'
-
-            - echo "=== Player ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.entity.player.Player 2>&1 | grep -Ei -A 5 -B 3 "inventory|attack|swing|item|cooldown" || true'
-
-            - echo "=== Inventory ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.entity.player.Inventory 2>&1 || true'
-
-            - echo "=== ItemStack ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.item.ItemStack 2>&1 | grep -Ei -A 5 -B 3 "isEmpty|is|count|item" || true'
-
-            - echo "=== Explosion ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.level.Explosion 2>&1 || true'
-
-            - echo "=== ExplosionDamageCalculator ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.level.ExplosionDamageCalculator 2>&1 || true'
-
-            - echo "=== SimpleExplosionDamageCalculator ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.level.SimpleExplosionDamageCalculator 2>&1 || true'
-
-            - echo "=== CombatRules ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.damagesource.CombatRules 2>&1 || true'
-
-            - echo "=== DamageSources ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.world.damagesource.DamageSources 2>&1 || true'
-
-            - echo "=== ClientPacketListener ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.client.multiplayer.ClientPacketListener 2>&1 | grep -Ei -A 5 -B 3 "send|connection" || true'
-
-            - echo "=== Minecraft ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.client.Minecraft 2>&1 | grep -Ei -A 5 -B 3 "player|level|gameMode|interaction" || true'
+            - echo "=== 26.2 Remove Entities Packet ==="
+            - 'javap -classpath "$MC_JAR" -p net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket 2>&1 || true'
+            
             - 'artifact push workflow build/libs'
