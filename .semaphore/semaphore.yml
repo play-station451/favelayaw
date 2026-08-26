@@ -20,7 +20,11 @@ blocks:
 
             - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
             - echo "Minecraft jar found at $MC_JAR"
-            - echo "=== MultiPlayerGameMode ==="
-            - 'javap -classpath "$MC_JAR" -p net.minecraft.client.multiplayer.MultiPlayerGameMode 2>&1 | grep -A 3 -B 3 "startPrediction"'
+            - echo "=== Check if jar exists and is readable ==="
+            - 'test -f "$MC_JAR" && echo "JAR exists" || echo "JAR NOT FOUND"'
+            - echo "=== List net.minecraft.block classes ==="
+            - 'jar tf "$MC_JAR" | grep "net/minecraft/block/BlockState.class" || echo "BlockState not found"'
+            - 'jar tf "$MC_JAR" | grep "net/minecraft/entity/Entity.class" || echo "Entity not found"'
+            - 'jar tf "$MC_JAR" | grep "net/minecraft/util/math/BlockPos.class" || echo "BlockPos not found"'
 
             - 'artifact push workflow build/libs'
