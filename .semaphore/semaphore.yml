@@ -26,9 +26,6 @@ blocks:
             - echo "=== Gradle Version ==="
             - ./gradlew --version
 
-            - echo "=== Build ==="
-            - ./gradlew clean build --stacktrace
-
             - echo "=== Loom Minecraft Cache ==="
             - find ~/.gradle/caches/fabric-loom -type f \
                 \( -name "minecraft-common.jar" -o -name "minecraft-client.jar" -o -name "minecraft-server.jar" \) \
@@ -65,6 +62,9 @@ blocks:
 
             - echo "=== Fabric Loom Cache Tree ==="
             - 'find ~/.gradle/caches/fabric-loom/26.2 -maxdepth 3 -type f 2>/dev/null | sort | head -n 300 || true'
+
+            - echo "=== Build ==="
+            - ./gradlew clean build --stacktrace
 
             - echo "=== Build Artifacts ==="
             - find build/libs -maxdepth 1 -type f -print
