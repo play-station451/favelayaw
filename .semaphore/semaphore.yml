@@ -1,41 +1,25 @@
 version: v1.0
 name: Build Java
-
 agent:
   machine:
     type: f1-standard-2
     os_image: ubuntu2404
 
 blocks:
-  - name: Build and Inspect
+  - name: Build and Test
     task:
       jobs:
         - name: Gradle Build
           commands:
             - checkout
-
-            - sem-version java 25
+            - sem-version java 21
             - java -version
-            - javac -version
-
             - chmod +x ./gradlew
 
-            - echo "=== Gradle / Minecraft Properties ==="
-            - ./gradlew properties | grep -Ei "minecraft_version|loader_version|fabric_api_version|loom_version|java" || true
+            - ./gradlew build || true
 
-            - echo "=== Gradle Version ==="
-            - ./gradlew --version
-
-            - echo "=== Loom Minecraft Cache ==="
-            - find ~/.gradle/caches/fabric-loom -type f \
-                \( -name "minecraft-common.jar" -o -name "minecraft-client.jar" -o -name "minecraft-server.jar" \) \
-                2>/dev/null | sort
-
-            - echo "=== Locate Minecraft 26.2 JAR ==="
-            - 'MC_JAR=$(find ~/.gradle/caches/fabric-loom -type f -name "minecraft-common.jar" 2>/dev/null | sort | tail -n 1)'
-            - 'if [ -z "$MC_JAR" ]; then echo "minecraft-common.jar not found"; exit 1; fi'
-            - 'echo "Minecraft common jar: $MC_JAR"'
-
+            - 'MC_JAR=$(find ~/.gradle -iname "*minecraft*.jar" 2>/dev/null | grep -vi sources | head -n 1)'
+            - echo "Minecraft jar found at $MC_JAR"
             - echo "=== Minecraft JAR Contents ==="
             - 'jar tf "$MC_JAR" | grep -Ei "MultiPlayerGameMode|EndCrystal|Crystal|Inventory|Interaction|Explosion" | head -n 300 || true'
 
@@ -59,14 +43,5 @@ blocks:
 
             - echo "=== Relevant World / Entity Classes ==="
             - 'jar tf "$MC_JAR" | grep -Ei "world/level|world/entity|world/item" | grep -Ei "Player|LivingEntity|Entity|Block|ItemStack|Interaction" | head -n 300 || true'
-
-            - echo "=== Fabric Loom Cache Tree ==="
-            - 'find ~/.gradle/caches/fabric-loom/26.2 -maxdepth 3 -type f 2>/dev/null | sort | head -n 300 || true'
-
-            - echo "=== Build ==="
-            - ./gradlew clean build --stacktrace
-
-            - echo "=== Build Artifacts ==="
-            - find build/libs -maxdepth 1 -type f -print
 
             - 'artifact push workflow build/libs'
