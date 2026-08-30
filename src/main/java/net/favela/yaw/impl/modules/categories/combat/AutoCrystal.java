@@ -29,7 +29,9 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.ClipContext;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static net.favela.yaw.impl.util.wrapper.Wrapper.MC;
@@ -256,12 +258,19 @@ public class AutoCrystal extends Module {
         placeTarget = null;
         rotationTarget = null;
 
+        double maxRange = Math.max(
+                Math.max(breakRange.getDouble(), breakWallRange.getDouble()),
+                Math.max(placeRange.getDouble(), placeWallRange.getDouble())
+        );
+
+        List<LivingEntity> nearbyTargets = collectNearbyTargets(maxRange);
+
         if (attack.get()) {
-            attackTarget = findBestCrystalToBreak();
+            attackTarget = findBestCrystalToBreak(nearbyTargets);
         }
 
         if (place.get()) {
-            placeTarget = findBestBlockToPlace();
+            placeTarget = findBestBlockToPlace(nearbyTargets);
         }
 
         if (rotationTarget != null && rotate.get() == Rotate.PACKET) {
@@ -284,12 +293,40 @@ public class AutoCrystal extends Module {
         }
     }
 
-    private EndCrystal findBestCrystalToBreak() {
+    private List<LivingEntity> collectNearbyTargets(double maxRange) {
+        List<LivingEntity> result = new ArrayList<>();
+        double maxRangeSq = maxRange * maxRange;
+
+        for (Entity entity : MC.level.entitiesForRendering()) {
+            if (!(entity instanceof LivingEntity living)) {
+                continue;
+            }
+
+            if (!isValidTarget(living)) {
+                continue;
+            }
+
+            if (living.isDeadOrDying()) {
+                continue;
+            }
+
+            if (MC.player.distanceToSqr(living) > maxRangeSq * 4.0) {
+                continue;
+            }
+
+            result.add(living);
+        }
+
+        return result;
+    }
+
+    private EndCrystal findBestCrystalToBreak(List<LivingEntity> nearbyTargets) {
         EndCrystal bestCrystal = null;
         double bestDamage = minDamage.getDouble();
 
         double range = breakRange.getDouble();
         double wallRange = breakWallRange.getDouble();
+        double maxRange = Math.max(range, wallRange);
 
         for (Entity entity : MC.level.entitiesForRendering()) {
             if (!(entity instanceof EndCrystal crystal)) {
@@ -308,7 +345,7 @@ public class AutoCrystal extends Module {
 
             double distance = MC.player.distanceTo(crystal);
 
-            if (distance > range && distance > wallRange) {
+            if (distance > maxRange) {
                 continue;
             }
 
@@ -324,6 +361,10 @@ public class AutoCrystal extends Module {
                 continue;
             }
 
+            if (visible && distance > range && distance > wallRange) {
+                continue;
+            }
+
             double selfDamage = getExplosionDamage(
                     MC.player,
                     crystalPosition
@@ -334,7 +375,7 @@ public class AutoCrystal extends Module {
                 continue;
             }
 
-            double targetDamage = getBestTargetDamage(crystalPosition);
+            double targetDamage = getBestTargetDamage(crystalPosition, nearbyTargets);
 
             if (targetDamage > bestDamage) {
                 bestDamage = targetDamage;
@@ -346,7 +387,7 @@ public class AutoCrystal extends Module {
         return bestCrystal;
     }
 
-    private BlockPos findBestBlockToPlace() {
+    private BlockPos findBestBlockToPlace(List<LivingEntity> nearbyTargets) {
         BlockPos best = null;
         double bestDamage = minDamage.getDouble();
 
@@ -354,10 +395,6 @@ public class AutoCrystal extends Module {
         double wallRange = placeWallRange.getDouble();
 
         for (BlockPos pos : getCrystalBlocks()) {
-            if (!canPlaceCrystalOn(pos)) {
-                continue;
-            }
-
             Vec3 crystalPosition = new Vec3(
                     pos.getX() + 0.5,
                     pos.getY() + 1.0,
@@ -372,6 +409,10 @@ public class AutoCrystal extends Module {
                 continue;
             }
 
+            if (!canPlaceCrystalOn(pos)) {
+                continue;
+            }
+
             boolean visible = isVisible(crystalPosition);
 
             if (!visible && !placeThroughWalls.get()) {
@@ -379,6 +420,10 @@ public class AutoCrystal extends Module {
             }
 
             if (!visible && distance > wallRange) {
+                continue;
+            }
+
+            if (visible && distance > range) {
                 continue;
             }
 
@@ -392,7 +437,7 @@ public class AutoCrystal extends Module {
                 continue;
             }
 
-            double targetDamage = getBestTargetDamage(crystalPosition);
+            double targetDamage = getBestTargetDamage(crystalPosition, nearbyTargets);
 
             if (targetDamage > bestDamage) {
                 bestDamage = targetDamage;
@@ -404,22 +449,10 @@ public class AutoCrystal extends Module {
         return best;
     }
 
-    private double getBestTargetDamage(Vec3 explosionPosition) {
+    private double getBestTargetDamage(Vec3 explosionPosition, List<LivingEntity> nearbyTargets) {
         double best = 0.0;
 
-        for (Entity entity : MC.level.entitiesForRendering()) {
-            if (!(entity instanceof LivingEntity living)) {
-                continue;
-            }
-
-            if (!isValidTarget(living)) {
-                continue;
-            }
-
-            if (living.isDeadOrDying()) {
-                continue;
-            }
-
+        for (LivingEntity living : nearbyTargets) {
             double damage = getExplosionDamage(
                     living,
                     explosionPosition
@@ -516,10 +549,12 @@ public class AutoCrystal extends Module {
             MC.player.swing(hand);
         }
 
-        if (swap.get() != Swap.SILENT
-                && swap.get() != Swap.NORMAL
+        if (swap.get() == Swap.NORMAL
                 && oldSlot != MC.player.getInventory().getSelectedSlot()) {
             MC.player.getInventory().setSelectedSlot(oldSlot);
+            MC.player.connection.send(
+                    new ServerboundSetCarriedItemPacket(oldSlot)
+            );
         }
 
         if (swap.get() == Swap.SILENT) {
@@ -622,24 +657,13 @@ public class AutoCrystal extends Module {
         BlockState secondState =
                 MC.level.getBlockState(second);
 
-        if (placeMode.get() == PlaceMode.PROTOCOL) {
-            if (!firstState.isAir()
-                    && !firstState.is(Blocks.FIRE)) {
-                return false;
-            }
+        if (!firstState.isAir()
+                && !firstState.is(Blocks.FIRE)) {
+            return false;
+        }
 
-            if (!secondState.isAir()) {
-                return false;
-            }
-        } else {
-            if (!firstState.isAir()
-                    && !firstState.is(Blocks.FIRE)) {
-                return false;
-            }
-
-            if (!secondState.isAir()) {
-                return false;
-            }
+        if (!secondState.isAir()) {
+            return false;
         }
 
         AABB crystalBox = new AABB(
@@ -651,14 +675,15 @@ public class AutoCrystal extends Module {
                 pos.getZ() + 1.0
         );
 
-        for (Entity entity : MC.level.entitiesForRendering()) {
+        for (Entity entity : MC.level.getEntities(
+                MC.player,
+                crystalBox
+        )) {
             if (entity.isRemoved()) {
                 continue;
             }
 
-            if (entity.getBoundingBox().intersects(crystalBox)) {
-                return false;
-            }
+            return false;
         }
 
         return true;
@@ -696,25 +721,22 @@ public class AutoCrystal extends Module {
     }
 
     private Iterable<BlockPos> getCrystalBlocks() {
-        int radius =
-                (int) Math.ceil(
-                        Math.max(
-                                placeRange.getDouble(),
-                                placeWallRange.getDouble()
-                        )
-                );
+        double range = Math.max(
+                placeRange.getDouble(),
+                placeWallRange.getDouble()
+        );
+
+        int radius = (int) Math.ceil(range);
 
         BlockPos origin =
                 MC.player.blockPosition();
 
-        java.util.ArrayList<BlockPos> positions =
-                new java.util.ArrayList<>();
+        List<BlockPos> positions = new ArrayList<>();
 
         for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius; y <= radius; y++) {
-                for (int z = -radius; z <= radius; z++) {
-                    BlockPos pos =
-                            origin.offset(x, y, z);
+            for (int z = -radius; z <= radius; z++) {
+                for (int y = -radius; y <= radius; y++) {
+                    BlockPos pos = origin.offset(x, y, z);
 
                     double dx =
                             pos.getX() + 0.5 - MC.player.getX();
@@ -723,20 +745,11 @@ public class AutoCrystal extends Module {
                     double dz =
                             pos.getZ() + 0.5 - MC.player.getZ();
 
-                    double distance =
-                            Math.sqrt(
-                                    dx * dx
-                                            + dy * dy
-                                            + dz * dz
-                            );
-
-                    if (distance <=
-                            Math.max(
-                                    placeRange.getDouble(),
-                                    placeWallRange.getDouble()
-                            )) {
-                        positions.add(pos);
+                    if (dx * dx + dy * dy + dz * dz > range * range) {
+                        continue;
                     }
+
+                    positions.add(pos);
                 }
             }
         }
@@ -796,6 +809,10 @@ public class AutoCrystal extends Module {
                         explosionPosition
                 );
 
+        if (distance / 12.0 >= 1.0) {
+            return 0.0;
+        }
+
         double exposure =
                 getExposure(
                         explosionPosition,
@@ -804,10 +821,6 @@ public class AutoCrystal extends Module {
 
         double scaledDistance =
                 distance / 12.0;
-
-        if (scaledDistance >= 1.0) {
-            return 0.0;
-        }
 
         double impact =
                 (1.0 - scaledDistance)
